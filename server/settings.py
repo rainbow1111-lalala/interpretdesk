@@ -1,0 +1,145 @@
+"""模型接入设置，存本机 data/settings.json，界面上可改，不重启生效。
+
+分两层。文本层走 OpenAI 兼容的 /v1/chat/completions，负责底稿提炼、字幕译文、右栏拟稿，
+几乎所有服务商都兼容这个协议。语音层没有统一标准，所以做成可选引擎，见 SPEECH_ENGINES。
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+from . import config
+
+SETTINGS_PATH = config.DATA_DIR / "settings.json"
+
+# 语音引擎。single_stream 表示音频进、源语与目标语文本一起出，不必再走一次翻译。
+SPEECH_ENGINES: dict[str, dict[str, Any]] = {
+    "openai_chunk": {
+        "label": "转写分片（OpenAI 兼容 /v1/audio/transcriptions）",
+        "implemented": False,
+        "single_stream": False,
+        "note": "兼容面最广，本地 whisper、Groq、硅基流动、OpenAI 都能填。译文由文本层翻译，"
+                "比单流多滞后半秒左右。",
+        "defaults": {"base_url": "https://api.openai.com/v1", "model": "whisper-1"},
+    },
+    "qwen_livetranslate": {
+        "label": "通义千问 LiveTranslate（阿里云百炼实时 WebSocket）",
+        "implemented": True,
+        "single_stream": True,
+        "note": "音频进、双语文本出，官方口径延迟 2.8 秒。base url 填百炼给的 compatible-mode 地址即可，实时地址由程序换算。",
+        "defaults": {
+            "base_url": "https://<workspace>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen3.5-livetranslate-flash-realtime",
+        },
+    },
+    "gemini_live": {
+        "label": "Gemini Live Translate（单流，已实测可用）",
+        "implemented": True,
+        "single_stream": True,
+        "note": "音频进、双语文本与译文语音一起出，实测首句 3.5 秒、之后滞后 1.5 秒。",
+        "defaults": {
+            "base_url": ("wss://generativelanguage.googleapis.com/ws/"
+                         "google.ai.generativelanguage.v1beta.GenerativeService."
+                         "BidiGenerateContent"),
+            "model": "models/gemini-3.5-live-translate-preview",
+        },
+    },
+}
+
+
+@dataclass
+class Engine:
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+    def ready(self) -> bool:
+        return bool(self.base_url and self.model)
+
+
+@dataclass
+class Settings:
+    # 文本层：快档负责会议中拟稿，强档负责底稿提炼与「换强模型重写」
+    text: Engine = field(default_factory=Engine)
+    text_model_strong: str = ""
+    # 底稿原文检索用的向量模型，走文本层同一个端点与 key
+    embed_model: str = "text-embedding-v4"
+    # 拟稿时直接放进上下文的底稿原文字数上限。超出的部分改由向量检索补相关片段。
+    # 实测首字延迟：1.5k 字 1.6 秒，19.3k 字 1.8 到 3.3 秒，40k 字 5.05 秒。会议里首字超过
+    # 3 秒就难用，所以默认压在两万，再多的靠检索。
+    context_full_chars: int = 20_000
+    # 语音层
+    speech_engine: str = "qwen_livetranslate"
+    speech: Engine = field(default_factory=Engine)
+    target_lang: str = "zh-CN"
+    # 转写分片模式下每片多长，越短越快但越容易切断句子
+    chunk_seconds: float = 4.0
+
+    @property
+    def single_stream(self) -> bool:
+        return bool(SPEECH_ENGINES.get(self.speech_engine, {}).get("single_stream"))
+
+    def strong_model(self) -> str:
+        return self.text_model_strong or self.text.model
+
+    def redacted(self) -> dict:
+        """给界面看的，key 只回显是否已填，不回显内容。"""
+        data = asdict(self)
+        for section in ("text", "speech"):
+            data[section]["api_key"] = ""
+            data[section]["has_key"] = bool(getattr(self, section).api_key)
+        return data
+
+
+def load() -> Settings:
+    if not SETTINGS_PATH.exists():
+        return Settings()
+    try:
+        raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return Settings()
+    return Settings(
+        text=Engine(**{k: v for k, v in (raw.get("text") or {}).items()
+                       if k in {"base_url", "api_key", "model"}}),
+        text_model_strong=raw.get("text_model_strong", "") or "",
+        embed_model=raw.get("embed_model") or "text-embedding-v4",
+        context_full_chars=int(raw.get("context_full_chars") or 20_000),
+        speech_engine=raw.get("speech_engine") or "qwen_livetranslate",
+        speech=Engine(**{k: v for k, v in (raw.get("speech") or {}).items()
+                         if k in {"base_url", "api_key", "model"}}),
+        target_lang=raw.get("target_lang") or "zh-CN",
+        chunk_seconds=float(raw.get("chunk_seconds") or 4.0),
+    )
+
+
+def save(current: Settings, patch: dict) -> Settings:
+    """按界面提交的内容合并。api_key 留空表示不改动，不是清空。"""
+    for section in ("text", "speech"):
+        incoming = (patch.get(section) or {})
+        engine: Engine = getattr(current, section)
+        engine.base_url = (incoming.get("base_url", engine.base_url) or "").strip()
+        engine.model = (incoming.get("model", engine.model) or "").strip()
+        key = (incoming.get("api_key") or "").strip()
+        if key:
+            engine.api_key = key
+        elif incoming.get("clear_key"):
+            engine.api_key = ""
+    if "text_model_strong" in patch:
+        current.text_model_strong = (patch.get("text_model_strong") or "").strip()
+    if patch.get("embed_model"):
+        current.embed_model = patch["embed_model"].strip()
+    if patch.get("context_full_chars"):
+        current.context_full_chars = max(0, min(200_000, int(patch["context_full_chars"])))
+    if patch.get("speech_engine") in SPEECH_ENGINES:
+        current.speech_engine = patch["speech_engine"]
+    if patch.get("target_lang"):
+        current.target_lang = patch["target_lang"].strip()
+    if patch.get("chunk_seconds"):
+        current.chunk_seconds = max(1.5, min(10.0, float(patch["chunk_seconds"])))
+
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(
+        json.dumps(asdict(current), ensure_ascii=False, indent=2), encoding="utf-8")
+    SETTINGS_PATH.chmod(0o600)  # 里面有 api key
+    return current

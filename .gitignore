@@ -1,0 +1,24 @@
+# 依赖与构建产物
+.venv/
+node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+__pycache__/
+*.pyc
+
+# 凭证与本地配置
+.env
+.env.*
+!.env.example
+
+# 会议记录与测试音频，一律不进仓库
+data/
+server/tests/fixtures/
+
+# 系统与编辑器
+.DS_Store
+.vscode/
+.idea/
+
+# AI 本地配置
+.claude/settings.local.json
