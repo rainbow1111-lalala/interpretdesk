@@ -44,4 +44,6 @@ export type Draft = {
   done: boolean;
   error?: string;
   refined?: boolean;
+  // 段落收口后系统自动写的建议回复，同一张卡原地更新，区别于我主动要的
+  auto?: boolean;
 };

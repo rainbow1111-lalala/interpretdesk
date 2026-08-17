@@ -26,6 +26,10 @@ function clock(sec: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+// 自动建议回复用的固定指令。改这句话就是改自动回应的口径
+const AUTO_INSTRUCTION =
+  "对方刚说完左边这段话。结合会议底稿，帮我拟一段可以直接说的英文回复。";
+
 const TODAY = new Date().toLocaleDateString("zh-CN", {
   year: "numeric",
   month: "long",
@@ -47,11 +51,31 @@ export default function App() {
   const [health, setHealth] = useState<{ ok: boolean; detail: string } | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [drafting, setDrafting] = useState(false);
+  // 段落收口后右栏自动写建议回复；可关。ws 回调里读不到最新 state，用 ref 镜像
+  const [autoReply, setAutoReply] = useState(true);
+  const autoReplyRef = useRef(true);
+  const draftingRef = useRef(false);
+  const autoDraftId = useRef<number | null>(null);
+  const autoTimer = useRef<number | undefined>(undefined);
+  // ws 回调建立在 start 里，而 runDraft 声明在 start 之后，经 ref 转一道避免引用顺序问题
+  const runDraftRef = useRef<
+    ((i: string, q: "fast" | "good", r?: number, a?: boolean) => void) | null
+  >(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const capRef = useRef<AudioCapture | null>(null);
   const draftId = useRef(1);
+  // setLink 是异步生效的，连点两下「开始记录」会在按钮还没变灰前跑两遍 start，
+  // 弹出两个共享面板。用 ref 同步挡住重入
+  const startGate = useRef(false);
   const running = link === "live" || link === "starting" || link === "reconnecting";
+
+  useEffect(() => {
+    autoReplyRef.current = autoReply;
+  }, [autoReply]);
+  useEffect(() => {
+    draftingRef.current = drafting;
+  }, [drafting]);
 
   const refreshHealth = useCallback(() => {
     fetch("/api/health")
@@ -93,6 +117,8 @@ export default function App() {
   }, [teardown]);
 
   const start = useCallback(async () => {
+    if (startGate.current) return;
+    startGate.current = true;
     setNotice("");
     setLink("starting");
     setElapsed(0);
@@ -120,10 +146,24 @@ export default function App() {
               echo: msg.echo,
             });
             break;
-          case "turn":
+          case "turn": {
             setEntries((prev) => [...prev, msg as Entry]);
             setLive((prev) => (prev && prev.turnId === msg.turnId ? null : prev));
+            // 对方讲完一段外语，右栏自动给一版建议回复。同一张「自动」卡原地更新不刷屏；
+            // 稍等 700 毫秒，让后端按这段话预取的原文片段先落位
+            const t = msg as Entry;
+            const spoken = t.pairs.map((p) => p.src).join(" ").trim();
+            if (autoReplyRef.current && !t.echo && spoken.length >= 12) {
+              window.clearTimeout(autoTimer.current);
+              autoTimer.current = window.setTimeout(() => {
+                if (draftingRef.current || !autoReplyRef.current) return;
+                const id = autoDraftId.current ?? draftId.current++;
+                autoDraftId.current = id;
+                runDraftRef.current?.(AUTO_INSTRUCTION, "fast", id, true);
+              }, 700);
+            }
             break;
+          }
           case "status":
             if (msg.state === "live") setLink("live");
             else if (msg.state === "reconnecting") setLink("reconnecting");
@@ -156,11 +196,13 @@ export default function App() {
       teardown();
       setLink("idle");
       setNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      startGate.current = false;
     }
   }, [source, stop, teardown]);
 
   const runDraft = useCallback(
-    async (instruction: string, quality: "fast" | "good", replaceId?: number) => {
+    async (instruction: string, quality: "fast" | "good", replaceId?: number, auto = false) => {
       const id = replaceId ?? draftId.current++;
       setDrafting(true);
       setDrafts((prev) => {
@@ -171,8 +213,12 @@ export default function App() {
           zh: "",
           done: false,
           refined: quality === "good",
+          auto,
         };
-        return replaceId ? prev.map((d) => (d.id === id ? next : d)) : [...prev, next];
+        // replaceId 指向的卡可能还没建（自动建议第一次），没有就追加
+        return prev.some((d) => d.id === id)
+          ? prev.map((d) => (d.id === id ? next : d))
+          : [...prev, next];
       });
 
       const history = drafts.flatMap((d) => [
@@ -222,6 +268,10 @@ export default function App() {
     },
     [drafts],
   );
+
+  useEffect(() => {
+    runDraftRef.current = runDraft;
+  }, [runDraft]);
 
   const bars = [0.06, 0.16, 0.32];
 
@@ -326,6 +376,9 @@ export default function App() {
             {ctxInfo && ctxInfo.glossarySize > 0 && (
               <span className="label">术语锁定 {ctxInfo.glossarySize} 条</span>
             )}
+            <button className="mini" onClick={() => setAutoReply((v) => !v)}>
+              {autoReply ? "自动回应 开" : "自动回应 关"}
+            </button>
           </div>
           <Drafting
             drafts={drafts}

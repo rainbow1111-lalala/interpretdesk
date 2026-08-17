@@ -210,6 +210,26 @@ async def delete_doc(name: str) -> dict:
     return await get_context()
 
 
+@app.post("/api/context/prefetch")
+async def prefetch_excerpts(payload: dict) -> dict:
+    """右栏打字停顿时预取原文片段。
+
+    refresh_excerpts 跟着对方的话走，这里跟着我正在打的问题走。跑在打字停顿里，
+    等按下发出时片段已经是热的，检索始终不占拟稿关键路径。
+    """
+    query = (payload.get("query") or "").strip()
+    cfg = state.settings
+    if not query or len(retrieval.all_text(10 ** 9)) <= cfg.context_full_chars:
+        return {"chunks": len(state.excerpts)}
+    recent = " ".join((t.get("src") or "") for t in state.turns[-1:]).strip()
+    try:
+        state.excerpts = await retrieval.search(cfg.text, cfg.embed_model,
+                                                f"{query} {recent}".strip(), k=8)
+    except Exception as exc:
+        log.warning("按输入预取片段失败：%s：%s", type(exc).__name__, exc)
+    return {"chunks": len(state.excerpts)}
+
+
 @app.post("/api/context/search")
 async def search_docs(payload: dict) -> dict:
     """手动查原文，也用来验证索引是否可用。"""
@@ -276,7 +296,8 @@ async def refresh_excerpts() -> None:
     if not query:
         return
     try:
-        state.excerpts = await retrieval.search(cfg.text, cfg.embed_model, query, k=3)
+        # 预取在后台，捞 8 块和捞 3 块对首字延迟没有区别，多捞提高命中率
+        state.excerpts = await retrieval.search(cfg.text, cfg.embed_model, query, k=8)
     except Exception as exc:
         log.warning("预取原文片段失败：%s：%s", type(exc).__name__, exc)
 

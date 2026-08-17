@@ -20,14 +20,21 @@ export class AudioCapture {
 
     if (mode === "tab" || mode === "both") {
       // Chrome 只在共享标签页时给音频轨，所以必须一起请求视频；帧率压到最低省 CPU。
+      // 弹共享面板本身是浏览器安全要求，去不掉；能做的是把选错的路堵上：
+      // displaySurface 让面板默认停在「Chrome 标签页」页签，monitorTypeSurfaces 藏掉
+      // 整屏（macOS 上抓不到声音），selfBrowserSurface 藏掉本工具自己这个标签页，
+      // surfaceSwitching 允许会中直接换共享的标签页而不用重弹面板。
       const display = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 1 },
+        video: { frameRate: 1, displaySurface: "browser" },
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
         },
-      });
+        selfBrowserSurface: "exclude",
+        monitorTypeSurfaces: "exclude",
+        surfaceSwitching: "include",
+      } as DisplayMediaStreamOptions);
       if (display.getAudioTracks().length === 0) {
         display.getTracks().forEach((t) => t.stop());
         throw new Error(

@@ -107,12 +107,26 @@ def main() -> int:
         entries = page.locator(".entry").count()
         print(f"笔录条目 {entries} 条，收到音频帧 {frames['count']} 帧")
 
+        # 对方段落收口后右栏应自动出建议回复（真实走 /api/draft）
+        page.wait_for_selector("text=自动建议", timeout=15000)
+        page.wait_for_function(
+            "() => { const c = document.querySelectorAll('.card .zh');"
+            " return c.length >= 1 && c[0].textContent.trim().length > 0; }",
+            timeout=60000)
+        print("自动建议卡片已出现并写出内容")
+        # 先填字（空输入框时发出按钮本来就是灰的），再等自动稿写完、按钮恢复可用
         page.fill(".composer textarea", "对方要把赔偿上限压到 15%，帮我回一段顶回去。")
+        page.wait_for_selector(".send:not([disabled])", timeout=60000)
         page.click(".send")
-        page.wait_for_selector(".card .zh", timeout=60000)
-        page.wait_for_timeout(2500)
+        page.wait_for_function(
+            "() => document.querySelectorAll('.ask').length >= 2", timeout=60000)
+        page.wait_for_function(
+            "() => { const c = document.querySelectorAll('.card .zh');"
+            " return c.length >= 2 && [...c].every(x => x.textContent.trim()); }",
+            timeout=60000)
+        page.wait_for_timeout(1500)
         page.screenshot(path=str(SHOTS / "03-拟稿.png"))
-        print("拟稿卡片已渲染")
+        print("手动拟稿卡片已渲染（与自动建议并存）")
 
         page.click(".topbar .chip")
         page.wait_for_selector(".sheet h2")

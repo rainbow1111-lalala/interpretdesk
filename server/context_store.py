@@ -48,6 +48,59 @@ variants 里不要写包含在 zh 里面的短词，例如 zh 是"第三方托�
 
 _DOUBLET = re.compile(r"([^和与及]+)[和与及]([^和与及]+)")
 
+# 中英对照底稿里的术语对，三种常见写法：English（中文）、中文（English）、表格行 | EN | 中文 |
+_EN = r"[A-Za-z][A-Za-z0-9&/.,''\- ]{1,56}[A-Za-z.]"
+_ZH = r"[一-鿿][一-鿿0-9、（）\-与和及]{0,26}[一-鿿]"
+_PAIR_EN_ZH = re.compile(rf"({_EN})\s*[（(]({_ZH})[）)]")
+_PAIR_ZH_EN = re.compile(rf"({_ZH})\s*[（(]({_EN})[）)]")
+_ROW_EN_ZH = re.compile(rf"(?m)^\s*\|\s*({_EN})\s*\|\s*({_ZH})\s*\|")
+_ROW_ZH_EN = re.compile(rf"(?m)^\s*\|\s*({_ZH})\s*\|\s*({_EN})\s*\|")
+
+
+# 英文抓取是贪婪的，会把术语前面的冠词、介词、题号一起吞进来，先剥掉再入表
+_EN_STOP = {"a", "an", "the", "this", "that", "these", "those", "any", "such",
+            "under", "of", "in", "on", "for", "with", "by", "to", "and", "or",
+            "per", "pursuant", "as", "at", "from", "is", "are", "was", "were"}
+_EN_NUM = re.compile(r"[QqAa]?\d+[.．、）)]?")
+
+
+def _clean_en(en: str) -> str:
+    tokens = en.split()
+    while tokens and (tokens[0].lower() in _EN_STOP or _EN_NUM.fullmatch(tokens[0])):
+        tokens.pop(0)
+    return " ".join(tokens)
+
+
+def aligned_terms(text: str, cap: int = 200) -> list[tuple[str, str]]:
+    """从中英对照原文里确定性抽取术语对，不靠模型编。
+
+    底稿本身就是逐条对照的，法条名、协议术语的对应关系原文里现成且精确，比让模型猜
+    「可能的误译变体」可靠。同一个英文词配了多个中文译法时取出现次数最多的那个，
+    出现次数太少（仅一次）也收，反正替换是确定性的、错了能在原文里查到出处。
+    """
+    counts: dict[str, dict[str, int]] = {}
+
+    def feed(en: str, zh: str) -> None:
+        en, zh = _clean_en(en.strip()), zh.strip()
+        # 太短的英文词进了替换表容易误伤，比如把普通英文单词换成中文
+        if len(en) < 4 or len(zh) < 2 or re.search(r"[一-鿿]", en):
+            return
+        counts.setdefault(en, {})
+        counts[en][zh] = counts[en].get(zh, 0) + 1
+
+    for m in _PAIR_EN_ZH.finditer(text):
+        feed(m.group(1), m.group(2))
+    for m in _PAIR_ZH_EN.finditer(text):
+        feed(m.group(2), m.group(1))
+    for m in _ROW_EN_ZH.finditer(text):
+        feed(m.group(1), m.group(2))
+    for m in _ROW_ZH_EN.finditer(text):
+        feed(m.group(2), m.group(1))
+
+    pairs = [(en, max(zhs, key=zhs.get), sum(zhs.values())) for en, zhs in counts.items()]
+    pairs.sort(key=lambda p: -p[2])
+    return [(en, zh) for en, zh, _ in pairs[:cap]]
+
 
 def expand_doublets(preferred: str, variants: list[str]) -> set[str]:
     """把并列短语的两个槽位做叉乘。
@@ -90,6 +143,10 @@ class MeetingContext:
                 # 「第三方托管」，而原文本来就写着「第三方托管」，结果套成两层
                 if v and v != zh and v not in zh:
                     table[v] = zh
+            # 译文里留着没翻的英文术语也按表校正成给定译法；replacer 对英文词带词边界
+            en = (t.get("en") or "").strip()
+            if en and len(en) >= 4 and en != zh:
+                table.setdefault(en, zh)
         for p in self.parties:
             zh, en = (p.get("zh") or "").strip(), (p.get("en") or "").strip()
             if zh and en and en != zh:
@@ -183,6 +240,17 @@ async def build(paths: list[Path], extra_note: str = "") -> MeetingContext:
         sources=names,
         raw_excerpt="",
     )
+    # 对照原文里确定性抽出的术语对并进术语表，模型给过的英文词不重复收
+    seen = {(t.get("en") or "").strip().lower() for t in ctx.terms}
+    extracted = 0
+    for en, zh in aligned_terms(doc):
+        if en.lower() not in seen:
+            ctx.terms.append({"en": en, "zh": zh, "variants": []})
+            seen.add(en.lower())
+            extracted += 1
+    if extracted:
+        log.info("从对照原文抽出术语对 %d 条（模型另给 %d 条）",
+                 extracted, len(ctx.terms) - extracted)
     save(ctx)
 
     # 原文索引重建放在提炼之后，失败不影响底稿可用，只是会议中查不了原文

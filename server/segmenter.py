@@ -63,7 +63,13 @@ def build_replacer(table: dict[str, str]):
     parts, repls = [], []
     for i, key in enumerate(sorted(mapping, key=len, reverse=True)):
         # 中文法律短语里「和」「与」「及」互换不改变意思，匹配时按等价处理
-        parts.append(f"(?P<g{i}>{_CONJ.sub('[和与及]', re.escape(key))})")
+        body = _CONJ.sub("[和与及]", re.escape(key))
+        # 英文词加词边界，否则 act 会打进 action 这类长词里
+        if key[0].isascii() and key[0].isalnum():
+            body = r"\b" + body
+        if key[-1].isascii() and key[-1].isalnum():
+            body = body + r"\b"
+        parts.append(f"(?P<g{i}>{body})")
         repls.append(mapping[key])
     pattern = re.compile("|".join(parts))
 

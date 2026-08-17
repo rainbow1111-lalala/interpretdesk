@@ -38,6 +38,22 @@ export function Drafting({
 }) {
   const [text, setText] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
+  const prefetchTimer = useRef<number | undefined>(undefined);
+
+  // 打字停顿 300 毫秒就按当前输入预取原文片段，等按下发出时片段已经是热的。
+  // 检索跑在打字的间隙里，不占拟稿关键路径
+  const prefetch = (value: string) => {
+    window.clearTimeout(prefetchTimer.current);
+    const query = value.trim();
+    if (query.length < 4) return;
+    prefetchTimer.current = window.setTimeout(() => {
+      fetch("/api/context/prefetch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query }),
+      }).catch(() => {});
+    }, 300);
+  };
 
   useEffect(() => {
     const box = threadRef.current;
@@ -69,7 +85,7 @@ export function Drafting({
           const zhNote = noteAt >= 0 ? d.zh.slice(noteAt).replace(/^\s*/, "") : "";
           return (
           <div key={d.id}>
-            <div className="ask">{d.instruction}</div>
+            <div className="ask">{d.auto ? "自动建议 · 回应对方最后这段话" : d.instruction}</div>
             <div className="card" style={{ marginTop: 10 }}>
               {d.error ? (
                 <p className="en" style={{ paddingBottom: 16, fontSize: 15 }}>
@@ -103,7 +119,10 @@ export function Drafting({
         <textarea
           value={text}
           placeholder="要我怎么说？回车发出，Shift＋回车换行"
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            prefetch(e.target.value);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

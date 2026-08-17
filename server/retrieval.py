@@ -101,6 +101,26 @@ def all_text(limit: int = 120_000) -> str:
     return "\n\n".join(blocks)[:limit]
 
 
+_HEADING = re.compile(r"(?m)^(#{1,6}\s+.+)$")
+
+
+def sections(text: str) -> list[tuple[str, str]]:
+    """按 markdown 标题切成（标题, 正文）小节。
+
+    问答手册一节是一问一答，法规要点一节是一条法规，按标题切能保住这个天然单元，
+    定长滚动切会把问和答切进两块，检索命中了问却丢了答。没有标题的文件整体算一节。
+    """
+    parts = _HEADING.split(text)
+    result: list[tuple[str, str]] = []
+    if parts[0].strip():
+        result.append(("", parts[0]))
+    for i in range(1, len(parts), 2):
+        title = parts[i].lstrip("#").strip()
+        body = parts[i + 1] if i + 1 < len(parts) else ""
+        result.append((title, body))
+    return result
+
+
 def chunk(text: str) -> list[str]:
     """按段落攒到七百字上下切一块，块间留一点重叠，免得把一个条款切成两半都读不懂。"""
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
@@ -131,12 +151,23 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 async def rebuild_index(engine: Engine, model: str) -> int:
-    """把所有原文切块算向量存下来。上传或删除文件之后调一次。"""
+    """把所有原文切块算向量存下来。上传或删除文件之后调一次。
+
+    每块带上所在小节的标题，检索命中后模型能看出出处。带标题的小节另建一条「标题索引」：
+    向量按标题算（entry 里的 embed 字段），命中返回整节开头。问答手册这类 FAQ 文档，
+    对方提问的措辞和手册里预设的问题天然是同一类句子，标题对标题的匹配比对正文段落准。
+    """
     entries: list[dict] = []
     for path in sorted(DOCS_DIR.glob("*.txt")) if DOCS_DIR.exists() else []:
         text = path.read_text(encoding="utf-8", errors="replace")
-        for piece in chunk(text):
-            entries.append({"doc": path.stem, "text": piece})
+        for title, body in sections(text):
+            for piece in chunk(body):
+                labeled = f"【{title}】\n{piece}" if title else piece
+                entries.append({"doc": path.stem, "text": labeled})
+            if title and body.strip():
+                entries.append({"doc": path.stem,
+                                "text": f"【{title}】\n{body.strip()[:800]}",
+                                "embed": title})
     if not entries:
         INDEX_PATH.unlink(missing_ok=True)
         return 0
@@ -151,7 +182,8 @@ async def rebuild_index(engine: Engine, model: str) -> int:
 
     async def fill(batch: list[dict]) -> None:
         async with gate:
-            vectors = await llm.embed(engine, model, [e["text"] for e in batch])
+            vectors = await llm.embed(engine, model,
+                                      [e.get("embed") or e["text"] for e in batch])
         for entry, vector in zip(batch, vectors):
             entry["vec"] = vector
 
@@ -191,5 +223,13 @@ async def search(engine: Engine, model: str, query: str, k: int = 3) -> list[dic
     probe = vectors[0]
     scored = [(_cosine(probe, e["vec"]), e) for e in entries if e.get("vec")]
     scored.sort(key=lambda pair: -pair[0])
-    return [{"doc": e["doc"], "text": e["text"], "score": round(score, 3)}
-            for score, e in scored[:k]]
+    # 标题索引和正文块可能落在同一段原文上，去重后再取 k 条
+    hits, seen = [], set()
+    for score, e in scored:
+        if e["text"] in seen:
+            continue
+        seen.add(e["text"])
+        hits.append({"doc": e["doc"], "text": e["text"], "score": round(score, 3)})
+        if len(hits) == k:
+            break
+    return hits
