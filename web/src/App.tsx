@@ -170,8 +170,8 @@ export default function App() {
           case "turn": {
             setEntries((prev) => [...prev, msg as Entry]);
             setLive((prev) => (prev && prev.turnId === msg.turnId ? null : prev));
-            // 对方讲完一段外语，右栏自动给一版建议回复。同一张「自动」卡原地更新不刷屏；
-            // 稍等 700 毫秒，让后端按这段话预取的原文片段先落位
+            // 对方讲完一段外语，右栏自动给一版建议回复。同一张「自动」卡原地更新不刷屏。
+            // 只等 250 毫秒去抖连续收口：检索片段是后台预取、拿现成的，多等换不来新片段
             const t = msg as Entry;
             const spoken = t.pairs.map((p) => p.src).join(" ").trim();
             if (autoReplyRef.current && !t.echo && spoken.length >= 12) {
@@ -181,7 +181,7 @@ export default function App() {
                 const id = autoDraftId.current ?? draftId.current++;
                 autoDraftId.current = id;
                 runDraftRef.current?.(AUTO_INSTRUCTION, "fast", id, true);
-              }, 700);
+              }, 250);
             }
             break;
           }

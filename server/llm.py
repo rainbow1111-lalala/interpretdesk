@@ -31,6 +31,21 @@ def _endpoint(engine: Engine, path: str) -> str:
 _NO_THINKING_FIELD = {"enable_thinking": False}
 _field_supported: dict[str, bool] = {}
 
+# 连接复用。原先每次调用都新建 AsyncClient，每次拟稿、检索都重做一遍 TCP 与 TLS 握手，
+# 到北京端点一次一两百毫秒，全在白付。进程内共用一个客户端，连接保活五分钟，
+# 超时改为逐请求传入。
+_shared: httpx.AsyncClient | None = None
+
+
+def client() -> httpx.AsyncClient:
+    global _shared
+    if _shared is None or _shared.is_closed:
+        _shared = httpx.AsyncClient(
+            timeout=httpx.Timeout(180, connect=15),
+            limits=httpx.Limits(max_keepalive_connections=8, keepalive_expiry=300),
+        )
+    return _shared
+
 
 def _extra(engine: Engine) -> dict:
     if _field_supported.get(engine.base_url) is False:
@@ -59,16 +74,16 @@ async def generate(engine: Engine, model: str, prompt: str, system: str | None =
                    temperature: float = 0.3, timeout: float = 120) -> str:
     base = {"model": model, "messages": _messages(prompt, system),
             "temperature": temperature, "stream": False}
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for attempt in (0, 1):
-            extra = _extra(engine) if attempt == 0 else {}
-            r = await client.post(_endpoint(engine, "chat/completions"),
-                                  headers=_headers(engine), json={**base, **extra})
-            if r.status_code >= 400 and extra and _rejected_extra(r.status_code, r.text):
-                _field_supported[engine.base_url] = False
-                continue
-            r.raise_for_status()
-            return _first_text(r.json())
+    for attempt in (0, 1):
+        extra = _extra(engine) if attempt == 0 else {}
+        r = await client().post(_endpoint(engine, "chat/completions"),
+                                headers=_headers(engine), json={**base, **extra},
+                                timeout=timeout)
+        if r.status_code >= 400 and extra and _rejected_extra(r.status_code, r.text):
+            _field_supported[engine.base_url] = False
+            continue
+        r.raise_for_status()
+        return _first_text(r.json())
     return ""
 
 
@@ -76,21 +91,20 @@ async def stream(engine: Engine, model: str, prompt: str, system: str | None = N
                  temperature: float = 0.4) -> AsyncIterator[str]:
     base = {"model": model, "messages": _messages(prompt, system),
             "temperature": temperature, "stream": True}
-    async with httpx.AsyncClient(timeout=180) as client:
-        for attempt in (0, 1):
-            extra = _extra(engine) if attempt == 0 else {}
-            async with client.stream("POST", _endpoint(engine, "chat/completions"),
-                                     headers=_headers(engine),
-                                     json={**base, **extra}) as r:
-                if r.status_code >= 400:
-                    detail = (await r.aread()).decode(errors="replace")[:300]
-                    if extra and _rejected_extra(r.status_code, detail):
-                        _field_supported[engine.base_url] = False
-                        continue
-                    raise RuntimeError(f"文本层返回 {r.status_code}：{detail}")
-                async for chunk in _sse_text(r):
-                    yield chunk
-                return
+    for attempt in (0, 1):
+        extra = _extra(engine) if attempt == 0 else {}
+        async with client().stream("POST", _endpoint(engine, "chat/completions"),
+                                   headers=_headers(engine),
+                                   json={**base, **extra}) as r:
+            if r.status_code >= 400:
+                detail = (await r.aread()).decode(errors="replace")[:300]
+                if extra and _rejected_extra(r.status_code, detail):
+                    _field_supported[engine.base_url] = False
+                    continue
+                raise RuntimeError(f"文本层返回 {r.status_code}：{detail}")
+            async for chunk in _sse_text(r):
+                yield chunk
+            return
 
 
 async def _sse_text(response: httpx.Response) -> AsyncIterator[str]:
@@ -140,11 +154,10 @@ async def embed(engine: Engine, model: str, texts: list[str]) -> list[list[float
     """OpenAI 兼容的 /v1/embeddings。取回的顺序按 index 排，不假设服务端原样返回。"""
     if not texts:
         return []
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(_endpoint(engine, "embeddings"), headers=_headers(engine),
-                              json={"model": model, "input": texts})
-        r.raise_for_status()
-        rows = r.json().get("data") or []
+    r = await client().post(_endpoint(engine, "embeddings"), headers=_headers(engine),
+                            json={"model": model, "input": texts}, timeout=60)
+    r.raise_for_status()
+    rows = r.json().get("data") or []
     rows.sort(key=lambda row: row.get("index", 0))
     return [row.get("embedding") or [] for row in rows]
 
@@ -152,10 +165,10 @@ async def embed(engine: Engine, model: str, texts: list[str]) -> list[list[float
 async def list_models(engine: Engine) -> list[str]:
     """拉 /v1/models 给界面做候选，拉不到就算了，不阻塞保存。"""
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.get(_endpoint(engine, "models"), headers=_headers(engine))
-            r.raise_for_status()
-            data = r.json()
+        r = await client().get(_endpoint(engine, "models"), headers=_headers(engine),
+                               timeout=20)
+        r.raise_for_status()
+        data = r.json()
         items = data.get("data") if isinstance(data, dict) else data
         return sorted({m.get("id", "") for m in (items or []) if m.get("id")})
     except Exception:
