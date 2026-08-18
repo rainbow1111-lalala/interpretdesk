@@ -85,7 +85,9 @@ export function Drafting({
           const zhNote = noteAt >= 0 ? d.zh.slice(noteAt).replace(/^\s*/, "") : "";
           return (
           <div key={d.id}>
-            <div className="ask">{d.auto ? "自动建议 · 回应对方最后这段话" : d.instruction}</div>
+            <div className="ask">
+              {d.auto ? `自动建议 · 回应：${d.answering ?? "对方最后这段话"}` : d.instruction}
+            </div>
             <div className="card" style={{ marginTop: 10 }}>
               {d.error ? (
                 <p className="en" style={{ paddingBottom: 16, fontSize: 15 }}>

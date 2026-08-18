@@ -1,17 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-type Props = {
-  meetingId: number;
-  turns: number;
-  onClose: () => void;
-};
-
-export function MinutesSheet({ meetingId, turns, onClose }: Props) {
+export function MinutesSheet({ meetingId, onClose }: { meetingId: number; onClose: () => void }) {
   const [markdown, setMarkdown] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const generate = async () => {
+  const generate = useCallback(async () => {
     setBusy(true);
     setError("");
     try {
@@ -26,7 +20,12 @@ export function MinutesSheet({ meetingId, turns, onClose }: Props) {
     } finally {
       setBusy(false);
     }
-  };
+  }, [meetingId]);
+
+  // 停止记录就开始整理，不等指令
+  useEffect(() => {
+    generate();
+  }, [generate]);
 
   const link = (suffix: string) => `/api/meetings/${meetingId}/minutes.${suffix}`;
 
@@ -34,47 +33,35 @@ export function MinutesSheet({ meetingId, turns, onClose }: Props) {
     <div className="sheet-bg" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <h2>会议纪要</h2>
-        <p className="hint">
-          这场会议记录了 {turns} 段对话。纪要由强档模型整理，含会议标题、时间、参会人和按议题
-          归类的讨论内容；文末附完整的逐句原话与译文，那一部分由程序直接从记录生成，不经模型改写。
-        </p>
 
-        <div className="row">
-          <button className="send" disabled={busy} onClick={generate}>
-            {busy ? "正在整理，约需十几秒" : markdown ? "重新生成" : "生成会议纪要"}
-          </button>
-          <span className="spacer" style={{ flex: 1 }} />
-          <button className="mini" onClick={onClose}>
-            关闭
-          </button>
-        </div>
-
+        {busy && <p className="test">正在整理…</p>}
         {error && <p className="notice">{error}</p>}
 
-        <div className="row" style={{ marginTop: 16 }}>
+        <div className="row">
           <span className="label">下载</span>
-          <a className="mini" href={link("md")}>
-            Markdown
-          </a>
           <a className="mini" href={link("docx")}>
             Word
           </a>
           <a className="mini" href={link("pdf")}>
             PDF
           </a>
+          <a className="mini" href={link("md")}>
+            Markdown
+          </a>
+          <span className="spacer" style={{ flex: 1 }} />
+          {!busy && (
+            <button className="mini" onClick={generate}>
+              重新生成
+            </button>
+          )}
+          <button className="mini" onClick={onClose}>
+            关闭
+          </button>
         </div>
-        <p className="hint" style={{ margin: "8px 0 0" }}>
-          没有生成纪要时，下载的文件只含逐句记录。Word 与 PDF 按仿宋小四、行距 26 的成稿格式排版。
-        </p>
 
         {markdown && (
           <div className="brief">
-            <dl>
-              <dt>预览</dt>
-              <dd>
-                <pre className="minutes-preview">{markdown}</pre>
-              </dd>
-            </dl>
+            <pre className="minutes-preview">{markdown}</pre>
           </div>
         )}
       </div>

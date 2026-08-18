@@ -64,6 +64,8 @@ export default function App() {
   const [minutesOpen, setMinutesOpen] = useState(false);
   // 暂停时不再往上送音频。用 ref 是因为音频回调建立在 start 里，拿不到最新的 state
   const pausedRef = useRef(false);
+  // 当前这张自动卡在回应哪一句，供卡片显示
+  const answeringRef = useRef("");
   // stop 里要知道这场会有没有内容，读 state 会拿到闭包里的旧值，用 ref 跟着走
   const entryCount = useRef(0);
   const autoReplyRef = useRef(true);
@@ -203,12 +205,20 @@ export default function App() {
             const spoken = t.pairs.map((p) => p.src).join(" ").trim();
             if (autoReplyRef.current && !t.echo && spoken.length >= 12) {
               window.clearTimeout(autoTimer.current);
-              autoTimer.current = window.setTimeout(() => {
-                if (draftingRef.current || !autoReplyRef.current) return;
+              // 正在写上一版时不能把这次触发丢掉，否则卡片会停在旧问题上，
+              // 屏幕已经翻过去了它还在答上一句。等写完再补一次。
+              const fire = () => {
+                if (!autoReplyRef.current) return;
+                if (draftingRef.current) {
+                  autoTimer.current = window.setTimeout(fire, 300);
+                  return;
+                }
                 const id = autoDraftId.current ?? draftId.current++;
                 autoDraftId.current = id;
+                answeringRef.current = spoken.slice(0, 40);
                 runDraftRef.current?.(AUTO_INSTRUCTION, "fast", id, true);
-              }, 250);
+              };
+              autoTimer.current = window.setTimeout(fire, 250);
             }
             break;
           }
@@ -265,6 +275,7 @@ export default function App() {
         const next: Draft = {
           id,
           instruction,
+          answering: auto ? answeringRef.current : undefined,
           en: "",
           zh: "",
           done: false,
@@ -465,11 +476,7 @@ export default function App() {
       </div>
 
       {minutesOpen && meetingId !== null && (
-        <MinutesSheet
-          meetingId={meetingId}
-          turns={entries.length}
-          onClose={() => setMinutesOpen(false)}
-        />
+        <MinutesSheet meetingId={meetingId} onClose={() => setMinutesOpen(false)} />
       )}
 
       {settingsOpen && (

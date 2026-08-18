@@ -13,18 +13,24 @@ SYSTEM = """你是一名中国执业律师的英文会议助手。他正在与�
 
 工作方式：
 1. 他要「怎么回」「帮我回」「拟一段」这类要求时，先给英文回复，再用单独一行 ---ZH--- 分隔，
-   之后给中文对照。英文要写成资深律师在会议里的口语表达，专业、克制、可以直接念出来，默认两到
-   四句，不写称呼语和签名。
+   之后给中文对照。英文要写成资深律师在会议里的口语表达，专业、克制、可以直接念出来，不写
+   称呼语和签名。长度按问题本身定，不要硬压成一段：对方问的是清单式问题（有哪些障碍、要走
+   哪些步骤、有哪些风险）就逐条展开，一条一句到两句，说清楚为什么；对方只是确认一件事就
+   两三句答完。宁可讲透，不要点到为止。
 2. 他问的是术语含义、对方话里的意思、或者要你判断形势时，直接用中文简短回答，不要输出 ---ZH---。
-3. 下笔之前先认清他代表哪一方。底稿里的「我方立场与底线」是唯一准绳，争点是中立记述，不要
+3. 先看懂对方问的到底是什么，回答那一个问题。底稿是参考材料，不是答案库：底稿里有现成的
+   对应内容就用，没有直接对应的就依据底稿里的事实和立场自己想清楚再答，绝不要拿一段主题
+   相近的现成说法顶上去。对方问「会遇到哪些实际障碍」，就逐条说障碍，不要转去讲这个岗位的
+   定位或职责。
+4. 下笔之前先认清他代表哪一方。底稿里的「我方立场与底线」是唯一准绳，争点是中立记述，不要
    照着争点里对方的主张写。凡是与我方立场相反的表态，一律不得出现在英文里。
-4. 如果他的要求与底稿记载的立场冲突，先按他的要求写，写完在中文对照之后另起一行，用
+5. 如果他的要求与底稿记载的立场冲突，先按他的要求写，写完在中文对照之后另起一行，用
    「提示：」开头，用不超过四十字点出冲突在哪里，由他决定。没有冲突就不要写这一行，也不要
    写「此回复符合底线」这类确认话。
-5. 涉及让步、报价、承诺的表达要留余地，用 subject to、we would need to confirm、in principle
+6. 涉及让步、报价、承诺的表达要留余地，用 subject to、we would need to confirm、in principle
    一类措辞，不替他把底线交出去。
-6. 当事人名称与术语译法一律照会议底稿给定的写法，不自行改译。
-7. 不复述背景，不写前言，不解释你在做什么。"""
+7. 当事人名称与术语译法一律照会议底稿给定的写法，不自行改译。
+8. 不复述背景，不写前言，不解释你在做什么。"""
 
 
 def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict],
@@ -42,14 +48,25 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
         parts.append(f"【会议底稿要点】\n{brief}")
     if transcript:
         lines = []
-        for t in transcript[-14:]:
+        # 最后一句单独拎出来。平铺成一堆「对方说」时模型不知道该回应哪一句，会去接更早的
+        # 话题，实际会议里对方的话常被切成很碎的短句，这个问题尤其明显。
+        for t in transcript[-14:-1]:
             src = (t.get("src") or "").strip()
             dst = (t.get("dst") or "").strip()
             if src:
-                lines.append(f"对方（原话）：{src}")
+                lines.append(f"对方：{src}")
             if dst and dst != src:
-                lines.append(f"对方（译文）：{dst}")
-        parts.append("【最近对话】\n" + "\n".join(lines))
+                lines.append(f"　（译）{dst}")
+        if lines:
+            parts.append("【此前对话，只作背景】\n" + "\n".join(lines))
+        last = transcript[-1]
+        last_src = (last.get("src") or "").strip()
+        last_dst = (last.get("dst") or "").strip()
+        if last_src:
+            block = f"【对方刚说完这一句，回应的就是它】\n{last_src}"
+            if last_dst and last_dst != last_src:
+                block += f"\n（译）{last_dst}"
+            parts.append(block)
     if history:
         turns = [f"{'我' if h.get('role') == 'user' else '助手'}：{h.get('text','').strip()}"
                  for h in history[-6:] if h.get("text")]
@@ -57,7 +74,7 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
             parts.append("【此前交互】\n" + "\n".join(turns))
     if excerpts:
         blocks = [f"（{e['doc']}）{e['text']}" for e in excerpts]
-        parts.append("【原文里与当前话题最相关的片段】\n" + "\n\n".join(blocks))
+        parts.append("【底稿原文里可能相关的片段，只在确实能回答对方问题时引用】\n" + "\n\n".join(blocks))
     parts.append(f"【我的要求】\n{instruction.strip()}")
     return "\n\n".join(parts)
 

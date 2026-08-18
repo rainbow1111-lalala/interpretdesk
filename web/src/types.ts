@@ -46,4 +46,6 @@ export type Draft = {
   refined?: boolean;
   // 段落收口后系统自动写的建议回复，同一张卡原地更新，区别于我主动要的
   auto?: boolean;
+  // 这张自动卡回应的是哪一句。卡片停在旧问题上时一眼能看出来
+  answering?: string;
 };
