@@ -93,7 +93,18 @@ async def get_settings() -> dict:
     engines = {key: {k: v for k, v in meta.items() if k != "defaults"} | 
                {"defaults": meta["defaults"]}
                for key, meta in settings_mod.SPEECH_ENGINES.items()}
-    return {"settings": state.settings.redacted(), "engines": engines}
+    return {"settings": state.settings.redacted(), "engines": engines,
+            "targetLangs": settings_mod.TARGET_LANGS,
+            "replyLangs": settings_mod.REPLY_LANGS}
+
+
+@app.get("/api/langs")
+async def get_langs() -> dict:
+    """顶栏切换语种用，比整份设置轻。"""
+    return {"targetLangs": settings_mod.TARGET_LANGS,
+            "replyLangs": settings_mod.REPLY_LANGS,
+            "targetLang": state.settings.target_lang,
+            "replyLang": state.settings.reply_lang}
 
 
 @app.post("/api/settings")

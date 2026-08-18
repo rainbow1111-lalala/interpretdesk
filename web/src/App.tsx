@@ -56,6 +56,12 @@ export default function App() {
   const [ctxInfo, setCtxInfo] = useState<ContextInfo | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [health, setHealth] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [langs, setLangs] = useState<{
+    targetLangs: { code: string; label: string }[];
+    replyLangs: { code: string; label: string }[];
+    targetLang: string;
+    replyLang: string;
+  } | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [drafting, setDrafting] = useState(false);
   // 段落收口后右栏自动写建议回复；可关。ws 回调里读不到最新 state，用 ref 镜像
@@ -125,7 +131,23 @@ export default function App() {
       .then(setCtxInfo)
       .catch(() => {});
     refreshHealth();
+    fetch("/api/langs")
+      .then((r) => r.json())
+      .then(setLangs)
+      .catch(() => {});
   }, [refreshHealth]);
+
+  // 语种改动立刻存。字幕译文语种在会话建立时就定了，所以录音中不给改
+  const setLang = useCallback(async (field: "target_lang" | "reply_lang", value: string) => {
+    setLangs((prev) =>
+      prev ? { ...prev, [field === "target_lang" ? "targetLang" : "replyLang"]: value } : prev,
+    );
+    await fetch("/api/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (link !== "live" && link !== "reconnecting") return;
@@ -203,7 +225,8 @@ export default function App() {
             // 只等 250 毫秒去抖连续收口：检索片段是后台预取、拿现成的，多等换不来新片段
             const t = msg as Entry;
             const spoken = t.pairs.map((p) => p.src).join(" ").trim();
-            if (autoReplyRef.current && !t.echo && spoken.length >= 12) {
+            // 对方讲中文还是外语都照常拟稿，听到中文不代表不用回应
+            if (autoReplyRef.current && spoken.length >= 12) {
               window.clearTimeout(autoTimer.current);
               // 正在写上一版时不能把这次触发丢掉，否则卡片会停在旧问题上，
               // 屏幕已经翻过去了它还在答上一句。等写完再补一次。
@@ -351,7 +374,34 @@ export default function App() {
           <span className={`dot ${link === "live" ? "live" : link === "reconnecting" ? "warn" : ""}`} />
           {STATE_LABEL[link]}
         </div>
-        <div className="status">英 → 中</div>
+        {langs && (
+          <div className="status">
+            <span>自动识别 →</span>
+            <select
+              value={langs.targetLang.split("-")[0]}
+              disabled={running}
+              title={running ? "字幕语种在开始记录时就定了，停止后才能改" : "字幕译文语种"}
+              onChange={(e) => setLang("target_lang", e.target.value)}
+            >
+              {langs.targetLangs.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}字幕
+                </option>
+              ))}
+            </select>
+            <select
+              value={langs.replyLang}
+              title="拟稿用哪种语言写"
+              onChange={(e) => setLang("reply_lang", e.target.value)}
+            >
+              {langs.replyLangs.map((l) => (
+                <option key={l.code} value={l.code}>
+                  拟稿用{l.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <span className="spacer" />
         <button className="chip" onClick={() => setSettingsOpen(true)}>
           模型设置

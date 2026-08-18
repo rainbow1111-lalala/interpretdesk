@@ -48,6 +48,36 @@ SPEECH_ENGINES: dict[str, dict[str, Any]] = {
 }
 
 
+# 字幕译文可选语种。取自阿里云百炼 LiveTranslate 支持的音频加文本输出语种，这里列常用的。
+# 源语言不设，由模型自动识别，所以日译中、韩译中、法译中这些只要把目标语设成中文即可。
+TARGET_LANGS: list[dict[str, str]] = [
+    {"code": "zh", "label": "中文"},
+    {"code": "en", "label": "英文"},
+    {"code": "ja", "label": "日文"},
+    {"code": "ko", "label": "韩文"},
+    {"code": "fr", "label": "法文"},
+    {"code": "de", "label": "德文"},
+    {"code": "es", "label": "西班牙文"},
+    {"code": "pt", "label": "葡萄牙文"},
+    {"code": "ru", "label": "俄文"},
+    {"code": "it", "label": "意大利文"},
+    {"code": "ar", "label": "阿拉伯文"},
+    {"code": "th", "label": "泰文"},
+    {"code": "vi", "label": "越南文"},
+    {"code": "id", "label": "印尼文"},
+]
+
+# 右栏拟稿用哪种语言写。与字幕译文分开：字幕译成我看得懂的，回复用我要说出口的那种语言。
+REPLY_LANGS: list[dict[str, str]] = [
+    {"code": "English", "label": "英文"},
+    {"code": "日本語", "label": "日文"},
+    {"code": "한국어", "label": "韩文"},
+    {"code": "Français", "label": "法文"},
+    {"code": "Deutsch", "label": "德文"},
+    {"code": "Español", "label": "西班牙文"},
+    {"code": "中文", "label": "中文"},
+]
+
 @dataclass
 class Engine:
     base_url: str = ""
@@ -74,6 +104,8 @@ class Settings:
     speech_engine: str = "qwen_livetranslate"
     speech: Engine = field(default_factory=Engine)
     target_lang: str = "zh-CN"
+    # 拟稿写成哪种语言。中文对照始终附在后面
+    reply_lang: str = "English"
     # 转写分片模式下每片多长，越短越快但越容易切断句子
     chunk_seconds: float = 4.0
 
@@ -110,6 +142,7 @@ def load() -> Settings:
         speech=Engine(**{k: v for k, v in (raw.get("speech") or {}).items()
                          if k in {"base_url", "api_key", "model"}}),
         target_lang=raw.get("target_lang") or "zh-CN",
+        reply_lang=raw.get("reply_lang") or "English",
         chunk_seconds=float(raw.get("chunk_seconds") or 4.0),
     )
 
@@ -136,6 +169,8 @@ def save(current: Settings, patch: dict) -> Settings:
         current.speech_engine = patch["speech_engine"]
     if patch.get("target_lang"):
         current.target_lang = patch["target_lang"].strip()
+    if patch.get("reply_lang"):
+        current.reply_lang = patch["reply_lang"].strip()
     if patch.get("chunk_seconds"):
         current.chunk_seconds = max(1.5, min(10.0, float(patch["chunk_seconds"])))
 

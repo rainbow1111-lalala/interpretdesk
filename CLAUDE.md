@@ -70,6 +70,15 @@
 - 改抽取逻辑后必须跑 `server/tests/extract_check.py`，七类输入全过才算完。
 - 抽取是同步阻塞的，调用处一律走 `asyncio.to_thread`，否则几十页 PDF 会卡住整个服务。
 
+## 语种
+
+- 源语言一律不设，靠模型自动识别，`qwen_live.session_update` 里 `input_audio_transcription`
+  不带 language 字段。不要改成写死源语言，否则中英混说的会议会认错。
+- 字幕译文语种与拟稿语言是两个独立设置（`target_lang` 与 `reply_lang`），不要合并。
+- **拟稿语言必须放在提示词最末尾**。放系统提示里会被后面大段英文底稿和英文对话盖过去，
+  实测切成日文后仍然吐英文，挪到最后一句才稳。见 `drafting.build_prompt` 结尾那块。
+- 自动建议不看语种。曾经用 `!t.echo` 挡掉中文，导致对方讲中文时右栏不动，已去掉。
+
 ## 会议纪要（导出）
 
 - 纪要正文交模型，逐句记录不交模型。`export_doc.verbatim_markdown` 直接从数据库生成，

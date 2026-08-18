@@ -9,15 +9,16 @@ from .context_store import MeetingContext
 
 log = logging.getLogger(__name__)
 
-SYSTEM = """你是一名中国执业律师的英文会议助手。他正在与外国律师开会，需要你实时帮他组织英文表达。
+SYSTEM_TEMPLATE = """你是一名中国执业律师的会议助手。他正在与外国律师开会，需要你实时帮他组织{lang}表达。
 
 工作方式：
-1. 他要「怎么回」「帮我回」「拟一段」这类要求时，先给英文回复，再用单独一行 ---ZH--- 分隔，
-   之后给中文对照。英文要写成资深律师在会议里的口语表达，专业、克制、可以直接念出来，不写
+1. 他要「怎么回」「帮我回」「拟一段」这类要求时，先给{lang}回复，再用单独一行 ---ZH--- 分隔，
+   之后给中文对照。{lang}要写成资深律师在会议里的口语表达，专业、克制、可以直接念出来，不写
    称呼语和签名。长度按问题本身定，不要硬压成一段：对方问的是清单式问题（有哪些障碍、要走
    哪些步骤、有哪些风险）就逐条展开，一条一句到两句，说清楚为什么；对方只是确认一件事就
    两三句答完。宁可讲透，不要点到为止。
 2. 他问的是术语含义、对方话里的意思、或者要你判断形势时，直接用中文简短回答，不要输出 ---ZH---。
+2.1 对方讲的是中文还是外语都要照常回应。听到中文不代表不用拟稿，一样按上面的格式给{lang}回复。
 3. 先看懂对方问的到底是什么，回答那一个问题。底稿是参考材料，不是答案库：底稿里有现成的
    对应内容就用，没有直接对应的就依据底稿里的事实和立场自己想清楚再答，绝不要拿一段主题
    相近的现成说法顶上去。对方问「会遇到哪些实际障碍」，就逐条说障碍，不要转去讲这个岗位的
@@ -33,9 +34,18 @@ SYSTEM = """你是一名中国执业律师的英文会议助手。他正在与�
 8. 不复述背景，不写前言，不解释你在做什么。"""
 
 
+def system_prompt(reply_lang: str) -> str:
+    """按配置的回复语言拼系统提示。回复语言就是中文时不必再给中文对照。"""
+    text = SYSTEM_TEMPLATE.replace("{lang}", reply_lang or "English")
+    if (reply_lang or "").strip() in ("中文", "zh", "zh-CN", "Chinese"):
+        text += ("\n\n补充：本场回复语言就是中文，直接给中文回复，不要输出 ---ZH--- "
+                 "分隔行，也不要再附中文对照。")
+    return text
+
+
 def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict],
                  instruction: str, excerpts: list[dict] | None = None,
-                 full_text: str = "") -> str:
+                 full_text: str = "", reply_lang: str = "English") -> str:
     """稳定的内容放最前，变动的放最后。
 
     原文与底稿摘要每次都一样，把它们放在提示词开头，服务端的上下文缓存才能命中同一段前缀；
@@ -76,6 +86,14 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
         blocks = [f"（{e['doc']}）{e['text']}" for e in excerpts]
         parts.append("【底稿原文里可能相关的片段，只在确实能回答对方问题时引用】\n" + "\n\n".join(blocks))
     parts.append(f"【我的要求】\n{instruction.strip()}")
+    # 输出语言放在最末尾。放在系统提示里会被后面大段的英文底稿和英文对话盖过去，实测切成
+    # 日文后仍然吐英文；挪到提示词最后一句才稳。
+    if (reply_lang or "").strip() in ("中文", "zh", "zh-CN", "Chinese"):
+        parts.append("【输出语言】整段回复用中文写，不要输出 ---ZH--- 分隔行。")
+    else:
+        parts.append(f"【输出语言】回复正文必须用{reply_lang}写，一个{reply_lang}的词都不能少；"
+                     f"写完另起一行写 ---ZH---，再给中文对照。即使上文全是英文，正文也要用"
+                     f"{reply_lang}。")
     return "\n\n".join(parts)
 
 
@@ -94,6 +112,8 @@ async def stream_draft(ctx: MeetingContext, transcript: list[dict], history: lis
     log.info("拟稿上下文：原文全文 %d 字，预取片段 %d 块，模型 %s",
              len(full_text), len(excerpts or []), model)
 
-    prompt = build_prompt(ctx, transcript, history, instruction, excerpts, full_text)
-    async for chunk in llm.stream(cfg.text, model, prompt, SYSTEM, temperature=0.4):
+    prompt = build_prompt(ctx, transcript, history, instruction, excerpts, full_text,
+                          cfg.reply_lang)
+    async for chunk in llm.stream(cfg.text, model, prompt,
+                                  system_prompt(cfg.reply_lang), temperature=0.4):
         yield chunk
