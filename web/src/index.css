@@ -83,7 +83,7 @@ select:focus-visible,
 
 .topbar h1 {
   font-family: var(--serif);
-  font-size: 19px;
+  font-size: 16px;
   font-weight: 500;
   margin: 0;
   letter-spacing: 0.01em;
@@ -204,7 +204,7 @@ select:focus-visible,
 
 .entry .source {
   font-family: var(--serif);
-  font-size: var(--src-size, 22px);
+  font-size: var(--src-size, 18px);
   line-height: 1.52;
   letter-spacing: 0.002em;
   margin: 0;
@@ -213,7 +213,7 @@ select:focus-visible,
 
 .entry .target {
   font-family: var(--sans);
-  font-size: var(--tgt-size, 17px);
+  font-size: var(--tgt-size, 14px);
   line-height: 1.78;
   color: var(--slate);
   margin: 9px 0 0;
@@ -251,7 +251,7 @@ select:focus-visible,
 
 .empty p {
   font-family: var(--serif);
-  font-size: 17px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--mute);
   margin: 0;
@@ -291,7 +291,7 @@ select:focus-visible,
   border-radius: 999px;
   background: var(--ink);
   color: #fff;
-  font-size: 13.5px;
+  font-size: 12.5px;
   letter-spacing: 0.02em;
 }
 
@@ -308,7 +308,7 @@ select:focus-visible,
 
 .timer {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   min-width: 62px;
@@ -336,7 +336,7 @@ select:focus-visible,
 
 select {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 10.5px;
   color: var(--slate);
   background: transparent;
   border: 1px solid var(--rule);
@@ -361,7 +361,7 @@ select {
 
 .ask {
   font-family: var(--sans);
-  font-size: 14px;
+  font-size: 12.5px;
   line-height: 1.6;
   color: var(--slate);
   padding-left: 12px;
@@ -376,7 +376,7 @@ select {
 
 .card .en {
   font-family: var(--serif);
-  font-size: 19px;
+  font-size: 16px;
   line-height: 1.58;
   padding: 16px 18px 0;
   margin: 0;
@@ -385,7 +385,7 @@ select {
 }
 
 .card .zh {
-  font-size: 14.5px;
+  font-size: 13px;
   line-height: 1.75;
   color: var(--slate);
   padding: 12px 18px 0;
@@ -396,7 +396,7 @@ select {
 
 /* 与底稿立场冲突的提示，是这一栏里唯一需要拦住视线的东西 */
 .card .note {
-  font-size: 13.5px;
+  font-size: 12.5px;
   line-height: 1.7;
   color: var(--seal);
   background: var(--seal-soft);
@@ -442,7 +442,7 @@ select {
   border: none;
   resize: none;
   font-family: var(--sans);
-  font-size: 14.5px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--ink);
   background: transparent;
@@ -470,7 +470,7 @@ select {
   border-radius: 999px;
   background: var(--ink);
   color: #fff;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .send:disabled {
@@ -518,12 +518,12 @@ select {
 .sheet h2 {
   font-family: var(--serif);
   font-weight: 500;
-  font-size: 21px;
+  font-size: 17px;
   margin: 0 0 4px;
 }
 
 .sheet .hint {
-  font-size: 13.5px;
+  font-size: 12.5px;
   line-height: 1.7;
   color: var(--slate);
   margin: 0 0 20px;
@@ -535,7 +535,7 @@ select {
   border-radius: 4px;
   padding: 22px;
   text-align: center;
-  font-size: 13.5px;
+  font-size: 12.5px;
   color: var(--slate);
   background: var(--paper);
   cursor: pointer;
@@ -554,7 +554,7 @@ select {
   border-radius: 4px;
   padding: 11px 12px;
   font-family: var(--sans);
-  font-size: 14px;
+  font-size: 12.5px;
   line-height: 1.65;
   min-height: 92px;
   resize: vertical;
@@ -579,7 +579,7 @@ select {
   border-radius: 4px;
   padding: 8px 10px;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: 11.5px;
   color: var(--ink);
   background: var(--paper);
 }
@@ -603,7 +603,7 @@ select {
 
 .test {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 10.5px;
   line-height: 1.6;
   margin: 8px 0 0;
   color: var(--slate);
@@ -619,14 +619,14 @@ select {
 
 .sheet code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
   background: var(--paper);
   padding: 1px 4px;
   border-radius: 3px;
 }
 
 .ok-note {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.7;
   color: #2f6b46;
   background: #f1f7f3;
@@ -657,7 +657,7 @@ select {
 
 .brief dd {
   margin: 6px 0 0;
-  font-size: 14px;
+  font-size: 12.5px;
   line-height: 1.7;
 }
 
@@ -666,12 +666,12 @@ select {
   grid-template-columns: 1fr 1fr;
   gap: 6px 14px;
   margin-top: 8px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .terms .en {
   font-family: var(--serif);
-  font-size: 14.5px;
+  font-size: 13px;
 }
 
 .terms .zh {
@@ -682,14 +682,14 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--slate);
   padding: 6px 0;
   border-bottom: 1px solid var(--rule-soft);
 }
 
 .notice {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--seal);
   background: var(--seal-soft);

@@ -26,9 +26,11 @@ function clock(sec: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// 自动建议回复用的固定指令。改这句话就是改自动回应的口径
+// 自动建议回复用的固定指令。改这句话就是改自动回应的口径。
+// 显式要求 ---ZH--- 分隔：快档模型偶尔漏写，中文对照就不显示了
 const AUTO_INSTRUCTION =
-  "对方刚说完左边这段话。结合会议底稿，帮我拟一段可以直接说的英文回复。";
+  "对方刚说完左边这段话。结合会议底稿，帮我拟一段可以直接说的英文回复。" +
+  "必须先输出英文，然后单独一行写 ---ZH---，再给中文对照，两部分都不能省。";
 
 const TODAY = new Date().toLocaleDateString("zh-CN", {
   year: "numeric",
@@ -345,8 +347,8 @@ export default function App() {
             className="record-wrap"
             style={
               {
-                "--src-size": `${(22 * zoom).toFixed(1)}px`,
-                "--tgt-size": `${(17 * zoom).toFixed(1)}px`,
+                "--src-size": `${(18 * zoom).toFixed(1)}px`,
+                "--tgt-size": `${(14 * zoom).toFixed(1)}px`,
               } as React.CSSProperties
             }
           >
