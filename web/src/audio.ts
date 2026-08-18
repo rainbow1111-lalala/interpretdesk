@@ -5,6 +5,30 @@ export type SourceMode = "tab" | "mic" | "both";
 const SAMPLE_RATE = 16000;
 const FRAME_SAMPLES = 1600; // 100ms
 
+export type MicDevice = { id: string; label: string };
+
+export async function listMics(): Promise<MicDevice[]> {
+  let devices = await navigator.mediaDevices.enumerateDevices();
+  if (!devices.some((d) => d.kind === "audioinput" && d.label)) {
+    // 授权前拿不到设备名，先要一次权限再列（只会弹一次系统授权）
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach((t) => t.stop());
+    devices = await navigator.mediaDevices.enumerateDevices();
+  }
+  return devices
+    .filter((d) => d.kind === "audioinput")
+    .map((d) => ({ id: d.deviceId, label: d.label || "麦克风" }));
+}
+
+export function preferredMic(list: MicDevice[]): string {
+  // macOS 连续互通可能把 iPhone 设为系统默认输入：点开始会弹 iPhone 连接页，
+  // 本机麦克风什么都收不到。默认优先本机内建麦克风，其次避开 iPhone
+  const builtin = list.find((d) => /内建|built-?in|macbook/i.test(d.label));
+  if (builtin) return builtin.id;
+  const notPhone = list.find((d) => !/iphone|ipad|continuity|连续互通/i.test(d.label));
+  return (notPhone ?? list[0])?.id ?? "";
+}
+
 /** 采到的音频不落地，直接按帧交给回调。 */
 export class AudioCapture {
   private ctx: AudioContext | null = null;
@@ -15,6 +39,7 @@ export class AudioCapture {
     mode: SourceMode,
     onFrame: (pcm: ArrayBuffer, peak: number) => void,
     onSourceEnded: () => void,
+    micDeviceId?: string,
   ): Promise<void> {
     const sources: MediaStream[] = [];
 
@@ -36,9 +61,25 @@ export class AudioCapture {
         surfaceSwitching: "include",
       } as DisplayMediaStreamOptions);
       if (display.getAudioTracks().length === 0) {
+        // 读出这次到底共享了什么，把差在哪直接说清楚，不让用户猜
+        const surface = display.getVideoTracks()[0]?.getSettings()?.displaySurface;
         display.getTracks().forEach((t) => t.stop());
+        if (surface === "window") {
+          throw new Error(
+            "这次共享的是「窗口」，macOS 上窗口共享带不了声音，音频开关对它无效。" +
+              "重新开始，在共享面板顶部切到「Chrome 标签页」页签，选会议标签页。" +
+              "会议开在桌面端应用（非浏览器）时，声源改选「麦克风（公放/现场）」外放收音。",
+          );
+        }
+        if (surface === "monitor") {
+          throw new Error(
+            "这次共享的是「整个屏幕」，macOS 上抓不到系统声音。重新开始，" +
+              "在共享面板选「Chrome 标签页」，或声源改选「麦克风（公放/现场）」外放收音。",
+          );
+        }
         throw new Error(
-          "这次共享没有带上声音。重新开始，在共享面板里选「Chrome 标签页」并打开「同时分享标签页音频」。",
+          "这次共享的标签页没有带上声音，底部「同时分享标签页音频」开关可能没生效。" +
+            "重新开始再试一次；不行就把声源改成「麦克风（公放/现场）」，外放会议声音用麦克风收。",
         );
       }
       display.getTracks().forEach((t) => t.addEventListener("ended", onSourceEnded));
@@ -46,8 +87,18 @@ export class AudioCapture {
     }
 
     if (mode === "mic" || mode === "both") {
+      // 纯麦克风模式的典型用法是收公放：会议声音从扬声器放出来，麦克风拾音。这时
+      // 回声消除会把从本机 Chrome 放出的会议声当回声消掉，降噪也削弱远场声音，都要关；
+      // 自动增益保留，补偿麦克风到扬声器的距离。混合模式下麦克风只负责收人声，
+      // 回声消除要开着，否则标签页的声音会被麦克风重复收一遍。
+      const farField = mode === "mic";
       const mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: {
+          ...(micDeviceId ? { deviceId: { exact: micDeviceId } } : {}),
+          echoCancellation: !farField,
+          noiseSuppression: !farField,
+          autoGainControl: true,
+        },
       });
       sources.push(mic);
     }

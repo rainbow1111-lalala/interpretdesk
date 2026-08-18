@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioCapture, type SourceMode } from "./audio";
+import { AudioCapture, listMics, preferredMic, type MicDevice, type SourceMode } from "./audio";
 import { ContextSheet } from "./ContextSheet";
 import { Drafting } from "./Drafting";
 import { SettingsSheet } from "./SettingsSheet";
@@ -8,7 +8,7 @@ import type { ContextInfo, Draft, Entry, LinkState, LiveEntry } from "./types";
 
 const SOURCE_LABEL: Record<SourceMode, string> = {
   tab: "会议标签页",
-  mic: "麦克风",
+  mic: "麦克风（公放/现场）",
   both: "混合声源",
 };
 
@@ -43,6 +43,9 @@ export default function App() {
   const [elapsed, setElapsed] = useState(0);
   const [peak, setPeak] = useState(0);
   const [source, setSource] = useState<SourceMode>("tab");
+  // 麦克风设备可选：macOS 连续互通会把 iPhone 设成系统默认输入，必须能指定本机麦克风
+  const [mics, setMics] = useState<MicDevice[]>([]);
+  const [micId, setMicId] = useState(() => localStorage.getItem("mi-mic-id") ?? "");
   const [zoom, setZoom] = useState(1);
   const [notice, setNotice] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -69,6 +72,22 @@ export default function App() {
   // 弹出两个共享面板。用 ref 同步挡住重入
   const startGate = useRef(false);
   const running = link === "live" || link === "starting" || link === "reconnecting";
+
+  useEffect(() => {
+    if (source === "tab" || mics.length > 0) return;
+    listMics()
+      .then((list) => {
+        setMics(list);
+        setMicId((cur) =>
+          cur && list.some((d) => d.id === cur) ? cur : preferredMic(list),
+        );
+      })
+      .catch(() => setNotice("拿不到麦克风列表，检查系统设置里 Chrome 的麦克风权限。"));
+  }, [source, mics.length]);
+
+  useEffect(() => {
+    if (micId) localStorage.setItem("mi-mic-id", micId);
+  }, [micId]);
 
   useEffect(() => {
     autoReplyRef.current = autoReply;
@@ -190,6 +209,7 @@ export default function App() {
           setNotice("共享已经停止，记录也停了。");
           stop();
         },
+        micId || undefined,
       );
       capRef.current = cap;
     } catch (e) {
@@ -199,7 +219,7 @@ export default function App() {
     } finally {
       startGate.current = false;
     }
-  }, [source, stop, teardown]);
+  }, [source, micId, stop, teardown]);
 
   const runDraft = useCallback(
     async (instruction: string, quality: "fast" | "good", replaceId?: number, auto = false) => {
@@ -365,6 +385,20 @@ export default function App() {
                   </option>
                 ))}
               </select>
+              {source !== "tab" && mics.length > 0 && (
+                <select
+                  value={micId}
+                  disabled={running}
+                  onChange={(e) => setMicId(e.target.value)}
+                  title="用哪个麦克风。iPhone 被系统设成默认输入时在这里换回本机麦克风"
+                >
+                  {mics.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         </section>
