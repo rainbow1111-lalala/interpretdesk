@@ -10,7 +10,9 @@ import logging
 import shutil
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import (FastAPI, File, Form, HTTPException, UploadFile, WebSocket,
                      WebSocketDisconnect)
@@ -18,7 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, context_store, drafting, llm, qwen_live, retrieval, store
+from . import (config, context_store, drafting, export_doc, llm, minutes,
+               qwen_live, retrieval, store)
 from . import settings as settings_mod
 from .live_client import LiveTranslateClient
 from .segmenter import TurnBuilder
@@ -278,8 +281,74 @@ async def get_meetings() -> list[dict]:
 
 @app.get("/api/meetings/{meeting_id}/export.md")
 async def export_meeting(meeting_id: int) -> PlainTextResponse:
+    """只要逐句记录，不含纪要正文。"""
     return PlainTextResponse(store.export_markdown(meeting_id),
                              media_type="text/markdown; charset=utf-8")
+
+
+@app.post("/api/meetings/{meeting_id}/minutes")
+async def make_minutes(meeting_id: int) -> dict:
+    """让强档模型整理纪要。不赶时间，用强档，返回 markdown 供预览。"""
+    try:
+        text = await minutes.generate(meeting_id, state.context)
+    except Exception as exc:
+        log.exception("生成纪要失败")
+        raise HTTPException(status_code=502,
+                            detail=f"{type(exc).__name__}：{exc}"[:300]) from exc
+    return {"markdown": text, "title": minutes.title_of(text),
+            "full": export_doc.full_markdown(meeting_id, text)}
+
+
+@app.get("/api/meetings/{meeting_id}/minutes")
+async def get_minutes(meeting_id: int) -> dict:
+    text = minutes.load(meeting_id)
+    return {"markdown": text, "title": minutes.title_of(text) if text else "",
+            "full": export_doc.full_markdown(meeting_id, text) if text else ""}
+
+
+def _download_name(meeting_id: int, suffix: str) -> str:
+    title = minutes.title_of(minutes.load(meeting_id), "会议纪要")[:30]
+    stamp = datetime.now().strftime("%y%m%d")
+    return f"【{stamp}】{title}.{suffix}"
+
+
+@app.get("/api/meetings/{meeting_id}/minutes.md")
+async def minutes_md(meeting_id: int) -> PlainTextResponse:
+    text = export_doc.full_markdown(meeting_id)
+    if not text.strip():
+        raise HTTPException(status_code=404, detail="这场会议还没有记录")
+    return PlainTextResponse(text, media_type="text/markdown; charset=utf-8",
+                             headers={"content-disposition":
+                                      f"attachment; filename*=UTF-8''"
+                                      f"{quote(_download_name(meeting_id, 'md'))}"})
+
+
+@app.get("/api/meetings/{meeting_id}/minutes.docx")
+async def minutes_docx(meeting_id: int) -> FileResponse:
+    text = export_doc.full_markdown(meeting_id)
+    if not text.strip():
+        raise HTTPException(status_code=404, detail="这场会议还没有记录")
+    path = config.DATA_DIR / "minutes" / f"{meeting_id}.docx"
+    await asyncio.to_thread(export_doc.to_docx, text, path)
+    return FileResponse(path, filename=_download_name(meeting_id, "docx"),
+                        media_type="application/vnd.openxmlformats-officedocument"
+                                   ".wordprocessingml.document")
+
+
+@app.get("/api/meetings/{meeting_id}/minutes.pdf")
+async def minutes_pdf(meeting_id: int) -> FileResponse:
+    text = export_doc.full_markdown(meeting_id)
+    if not text.strip():
+        raise HTTPException(status_code=404, detail="这场会议还没有记录")
+    docx_path = config.DATA_DIR / "minutes" / f"{meeting_id}.docx"
+    await asyncio.to_thread(export_doc.to_docx, text, docx_path)
+    try:
+        pdf_path = await asyncio.to_thread(export_doc.to_pdf, docx_path,
+                                           config.DATA_DIR / "minutes")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)[:300]) from exc
+    return FileResponse(pdf_path, filename=_download_name(meeting_id, "pdf"),
+                        media_type="application/pdf")
 
 
 async def refresh_excerpts() -> None:
@@ -376,6 +445,12 @@ async def ws_live(ws: WebSocket) -> None:
                 action = cmd.get("type")
                 if action == "stop":
                     break
+                if action == "pause":
+                    # 暂停时把当前这段收口，恢复后从新的一段开始
+                    await builder.close()
+                    await send({"type": "status", "state": "paused"})
+                if action == "resume":
+                    await send({"type": "status", "state": "live"})
                 if action == "audio":
                     want_audio = bool(cmd.get("on"))
                 if action == "reload_context":

@@ -721,3 +721,30 @@ select {
     transition: none;
   }
 }
+
+.minutes-preview {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 12px 14px;
+}
+
+.rec-btn.pause {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+
+a.mini {
+  text-decoration: none;
+  border: 1px solid var(--rule);
+  display: inline-block;
+}

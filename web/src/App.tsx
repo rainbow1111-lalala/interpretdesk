@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioCapture, listMics, preferredMic, type MicDevice, type SourceMode } from "./audio";
 import { ContextSheet } from "./ContextSheet";
 import { Drafting } from "./Drafting";
+import { MinutesSheet } from "./MinutesSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import { Transcript } from "./Transcript";
 import type { ContextInfo, Draft, Entry, LinkState, LiveEntry } from "./types";
@@ -16,6 +17,7 @@ const STATE_LABEL: Record<LinkState, string> = {
   idle: "待机",
   starting: "接入中",
   live: "正在同传",
+  paused: "已暂停",
   reconnecting: "重连中",
   error: "已中断",
 };
@@ -58,6 +60,12 @@ export default function App() {
   const [drafting, setDrafting] = useState(false);
   // 段落收口后右栏自动写建议回复；可关。ws 回调里读不到最新 state，用 ref 镜像
   const [autoReply, setAutoReply] = useState(true);
+  const [meetingId, setMeetingId] = useState<number | null>(null);
+  const [minutesOpen, setMinutesOpen] = useState(false);
+  // 暂停时不再往上送音频。用 ref 是因为音频回调建立在 start 里，拿不到最新的 state
+  const pausedRef = useRef(false);
+  // stop 里要知道这场会有没有内容，读 state 会拿到闭包里的旧值，用 ref 跟着走
+  const entryCount = useRef(0);
   const autoReplyRef = useRef(true);
   const draftingRef = useRef(false);
   const autoDraftId = useRef<number | null>(null);
@@ -73,7 +81,7 @@ export default function App() {
   // setLink 是异步生效的，连点两下「开始记录」会在按钮还没变灰前跑两遍 start，
   // 弹出两个共享面板。用 ref 同步挡住重入
   const startGate = useRef(false);
-  const running = link === "live" || link === "starting" || link === "reconnecting";
+  const running = link !== "idle" && link !== "error";
 
   useEffect(() => {
     if (source === "tab" || mics.length > 0) return;
@@ -97,6 +105,10 @@ export default function App() {
   useEffect(() => {
     draftingRef.current = drafting;
   }, [drafting]);
+
+  useEffect(() => {
+    entryCount.current = entries.length;
+  }, [entries]);
 
   const refreshHealth = useCallback(() => {
     fetch("/api/health")
@@ -135,7 +147,21 @@ export default function App() {
   const stop = useCallback(() => {
     teardown();
     setLink("idle");
+    pausedRef.current = false;
+    // 停下来就问一句要不要出纪要，会议刚结束是整理的最佳时机
+    if (entryCount.current > 0) setMinutesOpen(true);
   }, [teardown]);
+
+  const togglePause = useCallback(() => {
+    const next = !pausedRef.current;
+    pausedRef.current = next;
+    setLink(next ? "paused" : "live");
+    setPeak(0);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: next ? "pause" : "resume" }));
+    }
+  }, []);
 
   const start = useCallback(async () => {
     if (startGate.current) return;
@@ -143,6 +169,7 @@ export default function App() {
     setNotice("");
     setLink("starting");
     setElapsed(0);
+    pausedRef.current = false;
     setEntries([]);
     try {
       const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -186,8 +213,11 @@ export default function App() {
             break;
           }
           case "status":
-            if (msg.state === "live") setLink("live");
+            if (msg.state === "live") setLink(pausedRef.current ? "paused" : "live");
             else if (msg.state === "reconnecting") setLink("reconnecting");
+            break;
+          case "meeting":
+            setMeetingId(msg.meetingId ?? null);
             break;
           default:
             break;
@@ -204,6 +234,10 @@ export default function App() {
       await cap.start(
         source,
         (pcm, p) => {
+          if (pausedRef.current) {
+            setPeak(0);
+            return;
+          }
           setPeak(p);
           if (ws.readyState === WebSocket.OPEN) ws.send(pcm);
         },
@@ -356,10 +390,15 @@ export default function App() {
 
             <div className="recorder">
               {running ? (
-                <button className="rec-btn stop" onClick={stop}>
-                  <span className="seal-square" aria-hidden />
-                  停止记录
-                </button>
+                <>
+                  <button className="rec-btn stop" onClick={stop}>
+                    <span className="seal-square" aria-hidden />
+                    停止记录
+                  </button>
+                  <button className="rec-btn pause" onClick={togglePause}>
+                    {link === "paused" ? "继续" : "暂停"}
+                  </button>
+                </>
               ) : (
                 <button className="rec-btn" onClick={start}>
                   开始记录
@@ -424,6 +463,14 @@ export default function App() {
           />
         </section>
       </div>
+
+      {minutesOpen && meetingId !== null && (
+        <MinutesSheet
+          meetingId={meetingId}
+          turns={entries.length}
+          onClose={() => setMinutesOpen(false)}
+        />
+      )}
 
       {settingsOpen && (
         <SettingsSheet onClose={() => setSettingsOpen(false)} onSaved={refreshHealth} />

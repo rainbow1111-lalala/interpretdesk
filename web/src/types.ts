@@ -16,7 +16,7 @@ export type LiveEntry = {
   echo: boolean;
 };
 
-export type LinkState = "idle" | "starting" | "live" | "reconnecting" | "error";
+export type LinkState = "idle" | "starting" | "live" | "paused" | "reconnecting" | "error";
 
 export type Term = { en: string; zh: string; variants?: string[] };
 
