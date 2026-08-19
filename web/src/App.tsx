@@ -307,7 +307,8 @@ export default function App() {
   }, [source, micId, mics.length, stop, teardown]);
 
   const runDraft = useCallback(
-    async (instruction: string, quality: "fast" | "good", replaceId?: number, auto = false) => {
+    async (instruction: string, quality: "fast" | "good", replaceId?: number, auto = false,
+     mode?: "draft" | "ask") => {
       const id = replaceId ?? draftId.current++;
       setDrafting(true);
       setDrafts((prev) => {
@@ -341,7 +342,8 @@ export default function App() {
         const r = await fetch("/api/draft", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ instruction, history, quality, directives }),
+          body: JSON.stringify({ instruction, history, quality, directives,
+                                 mode: auto ? "draft" : mode }),
         });
         if (!r.ok || !r.body) throw new Error(`服务端返回 ${r.status}`);
         const reader = r.body.getReader();
@@ -540,7 +542,7 @@ export default function App() {
           <Drafting
             drafts={drafts}
             busy={drafting}
-            onAsk={(instruction) => runDraft(instruction, "fast")}
+            onAsk={(instruction, mode) => runDraft(instruction, "fast", undefined, false, mode)}
             onRefine={(d) => runDraft(d.instruction, "good", d.id)}
           />
         </section>

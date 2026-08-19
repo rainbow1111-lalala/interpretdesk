@@ -364,6 +364,8 @@ async def post_draft(payload: dict, s: State = Depends(current)) -> StreamingRes
     # 他手打的要求（自动建议那条固定指令不算），会中改口靠它一直生效
     directives = [str(d).strip() for d in (payload.get("directives") or []) if str(d).strip()]
     quality = payload.get("quality") or "fast"
+    # draft=要我拟稿，ask=问我含义或让我判断形势，空=自由输入，分不清就让模型自己认
+    mode = payload.get("mode") if payload.get("mode") in ("draft", "ask") else ""
     if not instruction:
         return StreamingResponse(iter(["data: \n\n"]), media_type="text/event-stream")
 
@@ -371,7 +373,7 @@ async def post_draft(payload: dict, s: State = Depends(current)) -> StreamingRes
         try:
             async for chunk in drafting.stream_draft(
                     s.ws, s.context, s.turns, history, instruction, quality,
-                    s.excerpts, directives):
+                    s.excerpts, directives, mode):
                 yield f"data: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
         except Exception as exc:
             log.exception("拟稿失败")

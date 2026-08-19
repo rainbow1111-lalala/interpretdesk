@@ -2,10 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { copyText } from "./copy";
 import type { Draft } from "./types";
 
-const QUICK: { label: string; instruction: string }[] = [
-  { label: "回这一段", instruction: "针对对方最后这段话，帮我拟一段英文回复。" },
-  { label: "追问", instruction: "针对对方最后这段话，帮我拟一句英文追问，把关键点问清楚。" },
-  { label: "这句什么意思", instruction: "对方最后这段话里有哪些说法值得我留意，用中文点出来。" },
+// mode 告诉后端这一次要的是拟稿还是问我。原来后端在提示词末尾无条件要求「英文正文加
+// ---ZH--- 对照」，把「问含义就中文简答」那条规则压死了，问「这句什么意思」也会回英文
+const QUICK: { label: string; instruction: string; mode: "draft" | "ask" }[] = [
+  { label: "回这一段", mode: "draft",
+    instruction: "针对对方最后这段话，帮我拟一段英文回复。" },
+  { label: "追问", mode: "draft",
+    instruction: "针对对方最后这段话，帮我拟一句英文追问，把关键点问清楚。" },
+  { label: "这句什么意思", mode: "ask",
+    instruction: "对方最后这段话里有哪些说法值得我留意，用中文点出来。" },
 ];
 
 function CopyButton({ text, label }: { text: string; label: string }) {
@@ -33,7 +38,7 @@ export function Drafting({
 }: {
   drafts: Draft[];
   busy: boolean;
-  onAsk: (instruction: string) => void;
+  onAsk: (instruction: string, mode?: "draft" | "ask") => void;
   onRefine: (draft: Draft) => void;
 }) {
   const [text, setText] = useState("");
@@ -71,10 +76,11 @@ export function Drafting({
     if (box && stick.current) box.scrollTop = box.scrollHeight;
   }, [drafts]);
 
-  const send = (instruction: string) => {
+  const send = (instruction: string, mode?: "draft" | "ask") => {
     const value = instruction.trim();
     if (!value || busy) return;
-    onAsk(value);
+    // 自由输入不传 mode，分不清是拟稿还是问话，交给模型自己认
+    onAsk(value, mode);
     setText("");
   };
 
@@ -145,7 +151,8 @@ export function Drafting({
         />
         <div className="row">
           {QUICK.map((q) => (
-            <button key={q.label} className="chip" disabled={busy} onClick={() => send(q.instruction)}>
+            <button key={q.label} className="chip" disabled={busy}
+                    onClick={() => send(q.instruction, q.mode)}>
               {q.label}
             </button>
           ))}

@@ -11,35 +11,48 @@ log = logging.getLogger(__name__)
 
 SYSTEM_TEMPLATE = """你是一名熟悉中国数据合规与跨境业务的中国执业律师，正在会议现场替另一名律师接话。他与外国律师开会，需要你实时帮他组织{lang}表达。
 
-工作方式：
-1. 他要「怎么回」「帮我回」「拟一段」这类要求时，先给{lang}回复，再用单独一行 ---ZH--- 分隔，
-   之后给中文对照。不写称呼语和签名。
-2. 回复是在会上当场接话的口语，不是书面文书：第一句直接回应对方刚问的那个点，再补一两句
-   理由；短句为主，允许缩写（we're、that's、can't）；可以用 Well、Actually、So、Look 一类
-   口语衔接开头；力求快速、自然反应。默认三五句说完，只有对方明确要清单（有哪些步骤、有哪些
-   风险）才逐条展开，一条一两句。念出来要像人说话，不像读文件。
-3. 先看懂对方问的到底是什么，回答那一个问题。底稿只是背景参考，不是答案库：有直接对应的
+一、输出形式
+
+1. 他要「怎么回」「帮我回」「拟一段」「帮我追问」这类要求时，先给{lang}回复，再用单独一行
+   ---ZH--- 分隔，之后给中文对照。不写称呼语和签名。
+2. 他问的是术语含义、对方话里的意思、或者要你判断形势时，直接用中文简短回答，不要输出
+   ---ZH---，也不要答完之后又顺手拟一段回复。他问的是什么就只给什么。
+3. 不复述背景，不写前言，不解释你在做什么。
+
+二、怎么说
+
+4. 回复是在会上当场接话的口语，不是书面文书：第一句直接回应对方刚问的那个点，再补一两句
+   理由；短句为主，允许缩写（we're、that's、can't）。默认三五句说完，只有对方明确要清单
+   （有哪些步骤、有哪些风险）才逐条展开，一条一两句。念出来要像人说话，不像读文件。
+5. 开头不要每次都用同一个词。Well、Actually、So、Look 一类口语衔接偶尔用可以，多数时候
+   直接进入正文，连着几段都用同一个开头会像口头禅。
+6. 先看懂对方问的到底是什么，回答那一个问题。底稿只是背景参考，不是答案库：有直接对应的
    内容就用；没有的，就以执业律师的身份凭你自己的专业知识、结合底稿里的事实和立场直接回答，
    禁止拿一段主题相近的现成段落顶数。对方问「会遇到哪些实际障碍」，就逐条说障碍，不要转去
    讲岗位定位或职责。
-3.1 紧跟现场议程：对方现在谈到哪就回应哪，以「此前对话」和「对方刚说完的这一句」为准。
+7. 紧跟现场议程：对方现在谈到哪就回应哪，以「此前对话」和「对方刚说完的这一句」为准。
    会议常会走到底稿没有覆盖的议题，这时候照常回答当前议题，不要把话头往底稿里的旧议题
    拉回去，更不要在无关话题里复述底稿立场。
-4. 他问的是术语含义、对方话里的意思、或者要你判断形势时，直接用中文简短回答，不要输出 ---ZH---。
-4.1 对方讲的是中文还是外语都要照常回应。听到中文不代表不用拟稿，一样按上面的格式给{lang}回复。
-5. 下笔之前先认清他代表哪一方。底稿里的「我方立场与底线」是唯一准绳，争点是中立记述，不要
-   照着争点里对方的主张写。凡是与我方立场相反的表态，一律不得出现在英文里。
-5.1 【会中指示】一节是他在这场会里当场给你的话，与会前底稿冲突时以会中指示为准；指示按
+8. 对方讲的是中文还是外语都要照常回应。听到中文不代表不用拟稿，一样按上面的格式给{lang}回复。
+
+三、立场与边界
+
+9. 下笔之前先认清他代表哪一方。底稿里的「我方立场与底线」是唯一准绳，争点是中立记述，不要
+   照着争点里对方的主张写。凡是与我方立场相反的表态，一律不得出现在{lang}里。
+10. 【会中指示】一节是他在这场会里当场给你的话，与会前底稿冲突时以会中指示为准；指示按
    先后顺序排列，后面的覆盖前面的。他说了不用某个方案、换个方向之后，回复里就不要再把
    旧方案当作我方的主张来讲，改按新方向回答对方眼下的问题。对方直接问到旧方案，或者需要
    说明为什么不再采用它，照实回应即可，不必回避。拿不准他是否推翻过，以最新那条指示为准。
-6. 如果他的要求与底稿记载的立场冲突，先按他的要求写，写完在中文对照之后另起一行，用
-   「提示：」开头，用不超过四十字点出冲突在哪里，由他决定。没有冲突就不要写这一行，也不要
-   写「此回复符合底线」这类确认话。
-7. 涉及让步、报价、承诺的表达要留余地，用 subject to、we would need to confirm、in principle
-   一类措辞，不替他把底线交出去。
-8. 当事人名称与术语译法一律照会议底稿给定的写法，不自行改译。
-9. 不复述背景，不写前言，不解释你在做什么。"""
+11. 不编造。具体的数字、日期、期限、金额、法条编号，以及任何一方此前说过什么、承诺过什么，
+   底稿或者现场对话里没有出处就不要写。确实需要一个数才能把话说完整时，用「这个我们需要
+   确认后回复」一类表述带过，宁可当场说不确定，也不要给一个听起来像真的数字。这一条高于
+   「答得完整」。
+12. 涉及让步、报价、承诺的表达要留余地，用 subject to、we would need to confirm、
+   in principle 一类措辞，不替他把底线交出去。
+13. 如果他的要求与底稿记载的立场冲突，或者与【会中指示】里更早的一条冲突，先按他最新的
+   要求写，写完在中文对照之后另起一行，用「提示：」开头，用不超过四十字点出冲突在哪里，
+   由他决定。没有冲突就不要写这一行，也不要写「此回复符合底线」这类确认话。
+14. 当事人名称与术语译法一律照会议底稿给定的写法，不自行改译。"""
 
 
 def system_prompt(reply_lang: str) -> str:
@@ -54,7 +67,7 @@ def system_prompt(reply_lang: str) -> str:
 def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict],
                  instruction: str, excerpts: list[dict] | None = None,
                  full_text: str = "", reply_lang: str = "English",
-                 directives: list[str] | None = None) -> str:
+                 directives: list[str] | None = None, mode: str = "") -> str:
     """稳定的内容放最前，变动的放最后。
 
     原文与底稿摘要每次都一样，把它们放在提示词开头，服务端的上下文缓存才能命中同一段前缀；
@@ -117,19 +130,34 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
     parts.append(f"【我的要求】\n{instruction.strip()}")
     # 输出语言放在最末尾。放在系统提示里会被后面大段的英文底稿和英文对话盖过去，实测切成
     # 日文后仍然吐英文；挪到提示词最后一句才稳。
-    if (reply_lang or "").strip() in ("中文", "zh", "zh-CN", "Chinese"):
+    #
+    # 但这一段原来是无条件加的，把系统提示里「问含义就中文简答、不要 ---ZH---」那条压死了：
+    # 实测问「carve-out 是什么意思」，回的是英文解释加 ---ZH--- 加中文对照；问「他这句是让步
+    # 还是施压」，中文答完又多拟了一段英文。所以按 mode 分支：ask 只要中文简答，draft 才
+    # 强制目标语言，前端说不清时（自由输入）把两种情形都写出来，由模型自己认。
+    zh_reply = (reply_lang or "").strip() in ("中文", "zh", "zh-CN", "Chinese")
+    if mode == "ask":
+        parts.append("【输出语言】这一条是问我的，不是要我拟稿：用中文简短回答，"
+                     "不要输出 ---ZH--- 分隔行，也不要另外拟一段回复。")
+    elif zh_reply:
         parts.append("【输出语言】整段回复用中文写，不要输出 ---ZH--- 分隔行。")
-    else:
+    elif mode == "draft":
         parts.append(f"【输出语言】回复正文必须用{reply_lang}写，一个{reply_lang}的词都不能少；"
                      f"写完另起一行写 ---ZH---，再给中文对照。即使上文全是英文，正文也要用"
                      f"{reply_lang}。")
+    else:
+        parts.append(f"【输出语言】我要的是拟稿时，正文必须用{reply_lang}写，一个{reply_lang}"
+                     f"的词都不能少，写完另起一行写 ---ZH--- 再给中文对照，即使上文全是英文也"
+                     f"照此办理；我问的是含义、意思或者要你判断形势时，直接用中文简短回答，"
+                     f"不要输出 ---ZH---，也不要另外拟一段回复。")
     return "\n\n".join(parts)
 
 
 async def stream_draft(ws: config.Workspace, ctx: MeetingContext, transcript: list[dict],
                        history: list[dict], instruction: str, quality: str = "fast",
                        excerpts: list[dict] | None = None,
-                       directives: list[str] | None = None) -> AsyncIterator[str]:
+                       directives: list[str] | None = None,
+                       mode: str = "") -> AsyncIterator[str]:
     cfg = settings_mod.load(ws)
     if not cfg.text.ready():
         raise RuntimeError("还没配文本模型，先在模型设置里填 base URL 与 model name")
@@ -143,7 +171,7 @@ async def stream_draft(ws: config.Workspace, ctx: MeetingContext, transcript: li
              len(full_text), len(excerpts or []), model)
 
     prompt = build_prompt(ctx, transcript, history, instruction, excerpts, full_text,
-                          cfg.reply_lang, directives)
+                          cfg.reply_lang, directives, mode)
     async for chunk in llm.stream(cfg.text, model, prompt,
                                   system_prompt(cfg.reply_lang), temperature=0.4):
         yield chunk
