@@ -65,13 +65,15 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
         # 最后一句单独拎出来。平铺成一堆「对方说」时模型不知道该回应哪一句，会去接更早的
         # 话题，实际会议里对方的话常被切成很碎的短句，这个问题尤其明显。
         # 最近对话按字符预算取而不是固定段数：一段常常只有一两句，固定 14 段只覆盖一两
-        # 分钟，会议走到新议程时拟稿还停在底稿旧议题上（实战反馈）。4000 字约覆盖十几分钟。
+        # 分钟，会议走到新议程时拟稿还停在底稿旧议题上（实战反馈）。这段在缓存前缀之外，
+        # 每次拟稿都重新处理。实测强档首字延迟：6000 字 1.3-1.6 秒（与基线持平），
+        # 8000 字跳到 2.6-2.8 秒，中间有台阶，定 6000（约覆盖二十多分钟）。改前先重测。
         recent = transcript[:-1]
         picked: list[dict] = []
         used = 0
         for t in reversed(recent):
             cost = len(t.get("src") or "") + len(t.get("dst") or "")
-            if used + cost > 4000 and picked:
+            if used + cost > 6000 and picked:
                 break
             used += cost
             picked.append(t)
