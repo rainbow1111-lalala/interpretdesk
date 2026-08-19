@@ -50,9 +50,11 @@ LIVE_PARTIAL = {
     "dst": "关于赔偿上限，我们得到的指示是百分之十五就是上限，",
 }
 
-# 桩掉屏幕采集：给一条真实存在的音轨，让 AudioWorklet 与 WebSocket 的接线照常跑起来
+# 桩掉音频采集：给一条真实存在的音轨，让 AudioWorklet 与 WebSocket 的接线照常跑起来。
+# 默认声源是麦克风，所以 getUserMedia 与 enumerateDevices 一并桩掉；getDisplayMedia
+# 留着，戴耳机抓会议标签页那条路仍要能测
 FAKE_CAPTURE = """
-navigator.mediaDevices.getDisplayMedia = async () => {
+const __tone = () => {
   const ctx = new AudioContext();
   const osc = ctx.createOscillator();
   osc.frequency.value = 220;
@@ -63,6 +65,12 @@ navigator.mediaDevices.getDisplayMedia = async () => {
   osc.start();
   return dest.stream;
 };
+navigator.mediaDevices.getDisplayMedia = async () => __tone();
+navigator.mediaDevices.getUserMedia = async () => __tone();
+navigator.mediaDevices.enumerateDevices = async () => [
+  { deviceId: "builtin", kind: "audioinput", label: "MacBook Pro 内建麦克风", groupId: "g1" },
+  { deviceId: "iphone", kind: "audioinput", label: "iPhone 麦克风", groupId: "g2" },
+];
 """
 
 

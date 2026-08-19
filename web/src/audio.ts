@@ -7,9 +7,13 @@ const FRAME_SAMPLES = 1600; // 100ms
 
 export type MicDevice = { id: string; label: string };
 
-export async function listMics(): Promise<MicDevice[]> {
+/**
+ * allowPrompt=false 时只枚举、不索权限。页面刚打开就弹麦克风授权框会把访客吓走，
+ * 所以进页面时用 false，等用户真的点「开始记录」（一次明确的手势）再用 true。
+ */
+export async function listMics(allowPrompt = true): Promise<MicDevice[]> {
   let devices = await navigator.mediaDevices.enumerateDevices();
-  if (!devices.some((d) => d.kind === "audioinput" && d.label)) {
+  if (allowPrompt && !devices.some((d) => d.kind === "audioinput" && d.label)) {
     // 授权前拿不到设备名，先要一次权限再列（只会弹一次系统授权）
     const s = await navigator.mediaDevices.getUserMedia({ audio: true });
     s.getTracks().forEach((t) => t.stop());
@@ -68,18 +72,18 @@ export class AudioCapture {
           throw new Error(
             "这次共享的是「窗口」，macOS 上窗口共享带不了声音，音频开关对它无效。" +
               "重新开始，在共享面板顶部切到「Chrome 标签页」页签，选会议标签页。" +
-              "会议开在桌面端应用（非浏览器）时，声源改选「麦克风（公放/现场）」外放收音。",
+              "会议开在桌面端应用（非浏览器）时，声源改选「麦克风（外放收音）」外放收音。",
           );
         }
         if (surface === "monitor") {
           throw new Error(
             "这次共享的是「整个屏幕」，macOS 上抓不到系统声音。重新开始，" +
-              "在共享面板选「Chrome 标签页」，或声源改选「麦克风（公放/现场）」外放收音。",
+              "在共享面板选「Chrome 标签页」，或声源改选「麦克风（外放收音）」外放收音。",
           );
         }
         throw new Error(
           "这次共享的标签页没有带上声音，底部「同时分享标签页音频」开关可能没生效。" +
-            "重新开始再试一次；不行就把声源改成「麦克风（公放/现场）」，外放会议声音用麦克风收。",
+            "重新开始再试一次；不行就把声源改成「麦克风（外放收音）」，外放会议声音用麦克风收。",
         );
       }
       display.getTracks().forEach((t) => t.addEventListener("ended", onSourceEnded));

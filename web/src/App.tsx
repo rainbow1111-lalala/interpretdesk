@@ -7,9 +7,11 @@ import { SettingsSheet } from "./SettingsSheet";
 import { Transcript } from "./Transcript";
 import type { ContextInfo, Draft, Entry, LinkState, LiveEntry } from "./types";
 
+// 顺序即下拉框里的顺序。日常用麦克风外放收音，省掉浏览器的共享面板那一步；
+// 戴耳机开线上会时对方的声音进不了麦克风，那种场合才需要抓会议标签页。
 const SOURCE_LABEL: Record<SourceMode, string> = {
-  tab: "会议标签页",
-  mic: "麦克风（公放/现场）",
+  mic: "麦克风（外放收音）",
+  tab: "会议标签页（戴耳机时用）",
   both: "混合声源",
 };
 
@@ -47,7 +49,7 @@ export default function App() {
   const [live, setLive] = useState<LiveEntry | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [peak, setPeak] = useState(0);
-  const [source, setSource] = useState<SourceMode>("tab");
+  const [source, setSource] = useState<SourceMode>("mic");
   // 麦克风设备可选：macOS 连续互通会把 iPhone 设成系统默认输入，必须能指定本机麦克风
   const [mics, setMics] = useState<MicDevice[]>([]);
   const [micId, setMicId] = useState(() => localStorage.getItem("mi-mic-id") ?? "");
@@ -93,14 +95,17 @@ export default function App() {
 
   useEffect(() => {
     if (source === "tab" || mics.length > 0) return;
-    listMics()
+    // 只枚举不索权限。授权前拿不到设备名，列表可能为空，这时下拉框不出，
+    // 等点「开始记录」时再要一次权限并按名字避开 iPhone
+    listMics(false)
       .then((list) => {
+        if (list.every((d) => !d.label)) return;
         setMics(list);
         setMicId((cur) =>
           cur && list.some((d) => d.id === cur) ? cur : preferredMic(list),
         );
       })
-      .catch(() => setNotice("拿不到麦克风列表，检查系统设置里 Chrome 的麦克风权限。"));
+      .catch(() => undefined);
   }, [source, mics.length]);
 
   useEffect(() => {
@@ -264,6 +269,16 @@ export default function App() {
         }
       };
 
+      // 进页面时没索权限，所以这里可能还没有设备名。趁这次点击（浏览器认的用户手势）
+      // 要一次权限再挑，否则默认设备可能是连续互通的 iPhone，本机什么都收不到
+      let useMic = micId;
+      if (source !== "tab" && mics.length === 0) {
+        const list = await listMics(true);
+        setMics(list);
+        useMic = micId && list.some((d) => d.id === micId) ? micId : preferredMic(list);
+        setMicId(useMic);
+      }
+
       const cap = new AudioCapture();
       await cap.start(
         source,
@@ -279,7 +294,7 @@ export default function App() {
           setNotice("共享已经停止，记录也停了。");
           stop();
         },
-        micId || undefined,
+        useMic || undefined,
       );
       capRef.current = cap;
     } catch (e) {
@@ -289,7 +304,7 @@ export default function App() {
     } finally {
       startGate.current = false;
     }
-  }, [source, micId, stop, teardown]);
+  }, [source, micId, mics.length, stop, teardown]);
 
   const runDraft = useCallback(
     async (instruction: string, quality: "fast" | "good", replaceId?: number, auto = false) => {
