@@ -20,7 +20,7 @@ from .context_store import MeetingContext
 
 log = logging.getLogger(__name__)
 
-MINUTES_DIR = config.DATA_DIR / "minutes"
+# 纪要按会话存，见 config.Workspace.minutes
 
 PROMPT = """你在为一名中国律师整理一场中英文会议的纪要。下面是这场会议的逐句笔录，以及会前底稿。
 
@@ -76,10 +76,10 @@ def _transcript_text(turns: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def meeting_window(meeting_id: int) -> str:
+def meeting_window(ws: config.Workspace, meeting_id: int) -> str:
     """会议时间由程序算，不交给模型。"""
-    turns = store.get_turns(meeting_id)
-    meetings = {m["id"]: m for m in store.list_meetings(500)}
+    turns = store.get_turns(ws, meeting_id)
+    meetings = {m["id"]: m for m in store.list_meetings(ws, 500)}
     started = meetings.get(meeting_id, {}).get("startedAt")
     if not started:
         return "待确认"
@@ -90,11 +90,11 @@ def meeting_window(meeting_id: int) -> str:
             f"（约 {minutes} 分钟）")
 
 
-async def generate(meeting_id: int, ctx: MeetingContext) -> str:
-    turns = store.get_turns(meeting_id)
+async def generate(ws: config.Workspace, meeting_id: int, ctx: MeetingContext) -> str:
+    turns = store.get_turns(ws, meeting_id)
     if not turns:
         raise RuntimeError("这场会议没有记录到内容，无法生成纪要")
-    cfg = settings_mod.load()
+    cfg = settings_mod.load(ws)
     if not cfg.text.ready():
         raise RuntimeError("还没配文本模型，先在模型设置里填 base URL 与 model name")
 
@@ -115,13 +115,13 @@ async def generate(meeting_id: int, ctx: MeetingContext) -> str:
     if not text:
         raise RuntimeError("模型没有返回内容")
 
-    MINUTES_DIR.mkdir(parents=True, exist_ok=True)
-    (MINUTES_DIR / f"{meeting_id}.md").write_text(text, encoding="utf-8")
+    ws.minutes.mkdir(parents=True, exist_ok=True)
+    (ws.minutes / f"{meeting_id}.md").write_text(text, encoding="utf-8")
     return text
 
 
-def load(meeting_id: int) -> str:
-    path = MINUTES_DIR / f"{meeting_id}.md"
+def load(ws: config.Workspace, meeting_id: int) -> str:
+    path = ws.minutes / f"{meeting_id}.md"
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 

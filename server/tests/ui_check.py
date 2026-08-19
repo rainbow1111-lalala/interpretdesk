@@ -9,12 +9,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:8787"
+BASE = f"http://127.0.0.1:{os.environ.get('MI_PORT', '8787')}"
 SHOTS = Path("/private/tmp/claude-501/-Users-rainbow/"
              "e14a2e43-5cb9-4694-842f-4e8f380bab4f/scratchpad/shots")
 

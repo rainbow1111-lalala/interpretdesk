@@ -21,7 +21,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
 
-from . import minutes, store
+from . import config, minutes, store
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ H3_SIZE = Pt(12)
 VERBATIM_HEADING = "附：会议逐句记录"
 
 
-def verbatim_markdown(meeting_id: int) -> str:
+def verbatim_markdown(ws: config.Workspace, meeting_id: int) -> str:
     """逐句原始记录。程序生成，与左栏笔录一致。"""
-    turns = store.get_turns(meeting_id)
+    turns = store.get_turns(ws, meeting_id)
     if not turns:
         return ""
     lines = [f"## {VERBATIM_HEADING}", "",
@@ -55,11 +55,11 @@ def verbatim_markdown(meeting_id: int) -> str:
     return "\n".join(lines)
 
 
-def full_markdown(meeting_id: int, minutes_md: str = "") -> str:
-    body = minutes_md or minutes.load(meeting_id)
-    verbatim = verbatim_markdown(meeting_id)
+def full_markdown(ws: config.Workspace, meeting_id: int, minutes_md: str = "") -> str:
+    body = minutes_md or minutes.load(ws, meeting_id)
+    verbatim = verbatim_markdown(ws, meeting_id)
     if not body:
-        body = f"# 会议逐句记录\n\n**会议时间**：{minutes.meeting_window(meeting_id)}\n"
+        body = f"# 会议逐句记录\n\n**会议时间**：{minutes.meeting_window(ws, meeting_id)}\n"
     return f"{body.rstrip()}\n\n{verbatim}" if verbatim else body
 
 

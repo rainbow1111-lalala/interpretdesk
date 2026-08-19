@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator
 
-from . import llm, retrieval, settings as settings_mod
+from . import config, llm, retrieval, settings as settings_mod
 from .context_store import MeetingContext
 
 log = logging.getLogger(__name__)
@@ -114,10 +114,10 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
     return "\n\n".join(parts)
 
 
-async def stream_draft(ctx: MeetingContext, transcript: list[dict], history: list[dict],
-                       instruction: str, quality: str = "fast",
+async def stream_draft(ws: config.Workspace, ctx: MeetingContext, transcript: list[dict],
+                       history: list[dict], instruction: str, quality: str = "fast",
                        excerpts: list[dict] | None = None) -> AsyncIterator[str]:
-    cfg = settings_mod.load()
+    cfg = settings_mod.load(ws)
     if not cfg.text.ready():
         raise RuntimeError("还没配文本模型，先在模型设置里填 base URL 与 model name")
     model = cfg.strong_model() if quality == "good" else cfg.text.model
@@ -125,7 +125,7 @@ async def stream_draft(ctx: MeetingContext, transcript: list[dict], history: lis
     # 底稿原文直接进上下文，装不下的部分用预取好的检索片段补。
     # 检索不放在这条路径上：它要多一次向量往返，实测会把首字从 3 秒推到 4 秒以上。
     # 片段由会议过程中后台预取，见 main.py 的 refresh_excerpts。
-    full_text = retrieval.all_text(cfg.context_full_chars) if cfg.context_full_chars else ""
+    full_text = retrieval.all_text(ws, cfg.context_full_chars) if cfg.context_full_chars else ""
     log.info("拟稿上下文：原文全文 %d 字，预取片段 %d 块，模型 %s",
              len(full_text), len(excerpts or []), model)
 

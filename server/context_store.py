@@ -17,7 +17,7 @@ from . import config, extract, llm, retrieval, settings as settings_mod
 
 log = logging.getLogger(__name__)
 
-BRIEF_PATH = config.DATA_DIR / "context.json"
+# 摘要按会话存，见 config.Workspace.brief
 # 提炼时喂给强档模型的上限。四份底稿合计十四万字是真实体量，留出余量。
 MAX_DOC_CHARS = 200_000
 
@@ -181,7 +181,7 @@ def _strip_fence(text: str) -> str:
     return text.strip()
 
 
-async def build(paths: list[Path], extra_note: str = "",
+async def build(ws: config.Workspace, paths: list[Path], extra_note: str = "",
                 replace: bool = False) -> MeetingContext:
     """把新文件并进已存原文，再对全部原文重新提炼一次底稿。
 
@@ -214,27 +214,27 @@ async def build(paths: list[Path], extra_note: str = "",
             failed.append(f"{p.name}（没抽到文字）")
 
     if replace and (ready or extra_note.strip()):
-        bin_dir = retrieval.clear_docs()
-        if bin_dir and BRIEF_PATH.exists():
-            shutil.copy2(BRIEF_PATH, bin_dir / "context.json")
+        bin_dir = retrieval.clear_docs(ws)
+        if bin_dir and ws.brief.exists():
+            shutil.copy2(ws.brief, bin_dir / "context.json")
         log.info("换底稿：旧原文与摘要挪进 %s", bin_dir)
 
     for stem, text, method in ready:
-        retrieval.store_doc(stem, text)
+        retrieval.store_doc(ws, stem, text)
         log.info("入库 %s：%s，%d 字", stem, method, len(text))
     if extra_note.strip():
-        retrieval.store_doc("口述补充", extra_note.strip())
+        retrieval.store_doc(ws, "口述补充", extra_note.strip())
 
-    doc = retrieval.all_text(MAX_DOC_CHARS)
-    names = [d["name"] for d in retrieval.list_docs()] + failed
+    doc = retrieval.all_text(ws, MAX_DOC_CHARS)
+    names = [d["name"] for d in retrieval.list_docs(ws)] + failed
     if not doc.strip():
         return MeetingContext(sources=names)
 
-    cfg = settings_mod.load()
+    cfg = settings_mod.load(ws)
     if not cfg.text.ready():
         raise RuntimeError("还没配文本模型，先在模型设置里填 base URL 与 model name")
     log.info("底稿提炼开始：%d 字，%d 份原文，模型 %s",
-             len(doc), len(retrieval.list_docs()), cfg.strong_model())
+             len(doc), len(retrieval.list_docs(ws)), cfg.strong_model())
     # 走流式。整段 JSON 憋到最后才回时会撞读超时，边收边攒就不会。
     parts: list[str] = []
     async for piece in llm.stream(cfg.text, cfg.strong_model(),
@@ -269,27 +269,27 @@ async def build(paths: list[Path], extra_note: str = "",
     if extracted:
         log.info("从对照原文抽出术语对 %d 条（模型另给 %d 条）",
                  extracted, len(ctx.terms) - extracted)
-    save(ctx)
+    save(ws, ctx)
 
     # 原文索引重建放在提炼之后，失败不影响底稿可用，只是会议中查不了原文
     try:
-        count = await retrieval.rebuild_index(cfg.text, cfg.embed_model)
+        count = await retrieval.rebuild_index(ws, cfg.text, cfg.embed_model)
         log.info("底稿原文索引 %d 块", count)
     except Exception as exc:
         log.warning("索引没建成：%s：%s", type(exc).__name__, exc)
     return ctx
 
 
-def save(ctx: MeetingContext) -> None:
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    BRIEF_PATH.write_text(
+def save(ws: config.Workspace, ctx: MeetingContext) -> None:
+    ws.root.mkdir(parents=True, exist_ok=True)
+    ws.brief.write_text(
         json.dumps(asdict(ctx), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load() -> MeetingContext:
-    if not BRIEF_PATH.exists():
+def load(ws: config.Workspace) -> MeetingContext:
+    if not ws.brief.exists():
         return MeetingContext()
     try:
-        return MeetingContext(**json.loads(BRIEF_PATH.read_text(encoding="utf-8")))
+        return MeetingContext(**json.loads(ws.brief.read_text(encoding="utf-8")))
     except Exception:
         return MeetingContext()
