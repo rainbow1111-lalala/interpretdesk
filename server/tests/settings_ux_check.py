@@ -43,11 +43,11 @@ def main() -> int:
         ok &= no_template
 
         # 把文本层切成智谱，应当出现「不做实时字幕」的提示
-        page.select_option(".sheet select >> nth=0", label="智谱（不做实时字幕）")
+        page.select_option(".sheet select >> nth=0", label="智谱（语音层需另配）")
         page.wait_for_timeout(300)
         warn = page.query_selector(".cfg-state.bad")
         has_warn = warn is not None and "实时字幕" in (warn.inner_text() if warn else "")
-        print("  选智谱后提示要另配语音 →", has_warn)
+        print("  选智谱后提示语音层要另配 →", has_warn)
         ok &= has_warn
 
         # base url 应被预设自动填好

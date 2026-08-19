@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 type Engine = { base_url: string; api_key: string; model: string; has_key?: boolean };
 
 /** 服务商预设。只预填 base url，不写死模型名：模型名会过时，用「拉模型清单」从端点真拉。
- *  speech 标的是这家能不能做实时字幕，用来提醒用户语音层要不要另找一家。 */
+ *  speech 标的是本程序接没接这家的实时字幕，不是这家有没有这个能力：OpenAI 有流式转写、
+ *  智谱有 GLM-Realtime，只是都还没接进来。措辞要落在自己身上，别替人家下能力判断。 */
 const PROVIDERS: { label: string; base_url: string; speech: boolean }[] = [
   { label: "阿里云百炼", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", speech: true },
   { label: "智谱", base_url: "https://open.bigmodel.cn/api/paas/v4", speech: false },
@@ -216,7 +217,7 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
                   {PROVIDERS.map((p) => (
                     <option key={p.label} value={p.label}>
                       {p.label}
-                      {p.speech ? "" : "（不做实时字幕）"}
+                      {p.speech ? "" : "（语音层需另配）"}
                     </option>
                   ))}
                 </select>
@@ -300,8 +301,9 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
                   OpenAI 做文本层的人，这一层必须另外找一家，界面上要直说 */}
               {providerOf(data.text.base_url)?.speech === false && (
                 <p className="cfg-state bad" style={{ marginTop: 0 }}>
-                  {providerOf(data.text.base_url)?.label} 没有可用于实时字幕的接口。
-                  这一层要另配阿里云百炼或 Gemini 的 key，不然只有拟稿没有字幕。
+                  实时字幕目前只接了阿里云百炼与 Gemini 两家。文本层用
+                  {providerOf(data.text.base_url)?.label}
+                  时，这一层要另配这两家之一的 key，不然只有拟稿没有字幕。
                 </p>
               )}
               <label className="field">
