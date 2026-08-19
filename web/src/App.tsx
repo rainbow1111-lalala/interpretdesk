@@ -538,8 +538,11 @@ export default function App() {
         <ContextSheet
           info={ctxInfo}
           onClose={() => setSheetOpen(false)}
-          onUploaded={(info) => {
+          onUploaded={(info, briefingReset) => {
             setCtxInfo(info);
+            // 换掉或清空底稿等于换一场会。拟稿卡片会作为对话历史发给模型，旧底稿写出来的
+            // 那几版留着就会继续影响后面的拟稿，一并清掉；同一场会补材料时不动
+            if (briefingReset) setDrafts([]);
             const ws = wsRef.current;
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ type: "reload_context" }));

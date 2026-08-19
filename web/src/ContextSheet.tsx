@@ -8,7 +8,8 @@ export function ContextSheet({
 }: {
   info: ContextInfo | null;
   onClose: () => void;
-  onUploaded: (info: ContextInfo) => void;
+  // briefingReset 表示这一次是换掉或清空了底稿，不是给同一场会补材料
+  onUploaded: (info: ContextInfo, briefingReset?: boolean) => void;
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
@@ -48,7 +49,7 @@ export function ContextSheet({
         throw new Error(detail || `服务端返回 ${r.status}`);
       }
       const next = (await r.json()) as ContextInfo;
-      onUploaded(next);
+      onUploaded(next, replace && existing > 0);
       const bad = next.sources.filter((x) => x.includes("失败"));
       setDone(
         `${replace && existing > 0 ? "换好了（旧底稿在 data/trash 可取回）：" : "读好了："}` +
@@ -196,8 +197,11 @@ export function ContextSheet({
                       }
                       const r = await fetch("/api/context", { method: "DELETE" });
                       if (r.ok) {
-                        onUploaded((await r.json()) as ContextInfo);
-                        setDone("底稿已清空，原文和摘要挪进了 data/trash，需要时可取回。");
+                        onUploaded((await r.json()) as ContextInfo, true);
+                        setDone(
+                          "底稿已清空：原文、摘要、术语表、原文索引、检索片段和拟稿记录都清了，" +
+                            "原文和摘要挪进 data/trash 可取回。",
+                        );
                       }
                     }}
                   >

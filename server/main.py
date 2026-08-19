@@ -49,12 +49,25 @@ class State:
         # 后台预取的原文片段，拟稿时直接用，不在关键路径上再做检索
         self.excerpts: list[dict] = []
         self.meeting_id: int | None = None
+        # 正在跑的字幕流水线。它在连接建立时拿的是当时的术语表快照，底稿一变必须推给它，
+        # 否则会中换掉或清空底稿之后，字幕还在按已经删掉的底稿改译法
+        self.builder: TurnBuilder | None = None
 
     def reset_meeting(self, title: str = "") -> int:
         self.turns = []
         self.excerpts = []
         self.meeting_id = store.start_meeting(title)
         return self.meeting_id
+
+    def drop_briefing_traces(self) -> None:
+        """底稿变了，把内存里跟着旧底稿走的东西一并换掉。
+
+        底稿在磁盘上换掉不等于这一场会就干净了：预取片段是旧原文的切块，术语表在字幕
+        流水线里另有一份快照。删底稿时这两处不清，旧底稿的内容会继续出现在字幕和拟稿里。
+        """
+        self.excerpts = []
+        if self.builder is not None:
+            self.builder.set_glossary(self.context.glossary())
 
 
 state = State()
@@ -188,9 +201,7 @@ async def post_context(files: list[UploadFile] = File(default=[]),
             dest.write_bytes(await f.read())
             paths.append(dest)
         state.context = await context_store.build(paths, note, replace)
-        # 预取片段是上一份底稿的原文切块，换底稿后必须扔掉，否则旧会议的内容会跟着
-        # 拟稿一起发出去
-        state.excerpts = []
+        state.drop_briefing_traces()
     except Exception as exc:
         log.exception("底稿提炼失败")
         raise HTTPException(status_code=502,
@@ -219,7 +230,7 @@ async def clear_context() -> dict:
         shutil.copy2(context_store.BRIEF_PATH, bin_dir / "context.json")
     state.context = context_store.MeetingContext()
     context_store.save(state.context)
-    state.excerpts = []
+    state.drop_briefing_traces()
     return await get_context()
 
 
@@ -227,7 +238,7 @@ async def clear_context() -> dict:
 async def delete_doc(name: str) -> dict:
     """删掉某一份原文。摘要不会自动重算，需要重新点读进来。"""
     retrieval.remove_doc(name)
-    state.excerpts = []
+    state.drop_briefing_traces()
     return await get_context()
 
 
@@ -419,6 +430,8 @@ async def ws_live(ws: WebSocket) -> None:
     # 百炼给全文、Gemini 给增量，语义不同，这里按引擎选
     cumulative = state.settings.speech_engine == "qwen_livetranslate"
     builder = TurnBuilder(on_turn, state.context.glossary(), cumulative=cumulative)
+    # 登记给 state，底稿一变就能把新术语表推过来，见 drop_briefing_traces
+    state.builder = builder
 
     async def on_live(event: dict) -> None:
         kind = event.get("type")
@@ -489,6 +502,8 @@ async def ws_live(ws: WebSocket) -> None:
         await builder.close()
         runner.cancel()
         await asyncio.gather(runner, idler, return_exceptions=True)
+        if state.builder is builder:
+            state.builder = None
         log.info("会议结束：音频 token %d，输出 token %d",
                  client.audio_tokens, client.response_tokens)
 
