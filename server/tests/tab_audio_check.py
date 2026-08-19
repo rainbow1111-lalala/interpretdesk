@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import base64
 import re
+import os
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:8787"
+BASE = f"http://127.0.0.1:{os.environ.get('MI_PORT', '8787')}"
 PCM = Path(__file__).resolve().parent / "fixtures" / "en.pcm"
 LOG = Path(__file__).resolve().parents[2] / "data" / "server.log"
 TITLE = "MI-AUDIO-SOURCE"

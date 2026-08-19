@@ -8,13 +8,15 @@ from pathlib import Path
 PROJ = "/Users/rainbow/AIwork/03-AI项目/meeting-interpreter"
 sys.path.insert(0, PROJ)
 
-from server import context_store, extract, llm, retrieval
+from server import config, context_store, extract, llm, retrieval
 
 tmp = Path(tempfile.mkdtemp(prefix="mi-replace-"))
-retrieval.DOCS_DIR = tmp / "docs"
-retrieval.TRASH_DIR = tmp / "trash"
-retrieval.INDEX_PATH = tmp / "index.json"
-context_store.BRIEF_PATH = tmp / "context.json"
+WS = config.Workspace(tmp / "ws")
+
+# 会话独立之后设置也是每人一份，测试工作区要自己配一个假模型，否则提炼会因没配模型而中止
+from server import settings as settings_mod  # noqa: E402
+settings_mod.save(WS, settings_mod.Settings(), {
+    "text": {"base_url": "https://test.example/v1", "api_key": "sk-test", "model": "m"}})
 
 LIVE_DOCS = Path(PROJ) / "data" / "docs"
 before_live = sorted(p.name for p in LIVE_DOCS.glob("*.txt"))
@@ -25,7 +27,7 @@ async def fake_stream(*a, **k):
         yield piece
 
 
-async def fake_rebuild(*a, **k):
+async def fake_rebuild(ws, *a, **k):
     return 0
 
 
@@ -43,24 +45,24 @@ def mkfile(name: str, body: str) -> Path:
 
 
 def docs() -> list[str]:
-    return sorted(d["name"] for d in retrieval.list_docs())
+    return sorted(d["name"] for d in retrieval.list_docs(WS))
 
 
 def trashed() -> list[str]:
-    return sorted(p.name for p in tmp.joinpath("trash").rglob("*.txt"))
+    return sorted(p.name for p in WS.trash.rglob("*.txt")) if WS.trash.exists() else []
 
 
 async def main() -> int:
     ok = True
 
     # 情形一：首次上传两份（累加模式，无旧底稿）
-    await context_store.build([mkfile("甲方尽调要点.txt", "甲方内容" * 20),
-                               mkfile("法规摘录.txt", "法规内容" * 20)], "")
+    await context_store.build(WS, [mkfile("甲方尽调要点.txt", "甲方内容" * 20),
+                                   mkfile("法规摘录.txt", "法规内容" * 20)], "")
     assert docs() == ["法规摘录", "甲方尽调要点"], docs()
     print("情形一 首次上传两份 →", docs())
 
     # 情形二：同一场会补材料（追加）
-    await context_store.build([mkfile("补充邮件.txt", "邮件内容" * 20)], "", replace=False)
+    await context_store.build(WS, [mkfile("补充邮件.txt", "邮件内容" * 20)], "", replace=False)
     got = docs()
     ok &= got == ["law", "补充邮件", "法规摘录", "甲方尽调要点"][1:] or got == [
         "法规摘录", "甲方尽调要点", "补充邮件"]
@@ -68,7 +70,7 @@ async def main() -> int:
     ok &= len(got) == 3
 
     # 情形三：换一场会（替换）
-    await context_store.build([mkfile("新会议提纲.txt", "新会内容" * 20)], "", replace=True)
+    await context_store.build(WS, [mkfile("新会议提纲.txt", "新会内容" * 20)], "", replace=True)
     got = docs()
     print("情形三 换新底稿 →", got, "｜回收站：", trashed())
     ok &= got == ["新会议提纲"]
@@ -85,7 +87,7 @@ async def main() -> int:
         return real_extract(p)
 
     extract.extract = boom
-    ctx = await context_store.build([bad], "", replace=True)
+    ctx = await context_store.build(WS, [bad], "", replace=True)
     got = docs()
     print("情形四 换新但文件读不出 →", got, "｜失败提示：",
           [s for s in ctx.sources if "读不出来" in s])

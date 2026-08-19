@@ -11,7 +11,7 @@ from typing import Any
 
 from . import config
 
-SETTINGS_PATH = config.DATA_DIR / "settings.json"
+# 设置按会话存，见 config.Workspace.settings。每个人填自己的 API key，谁也用不了谁的额度
 
 # 语音引擎。single_stream 表示音频进、源语与目标语文本一起出，不必再走一次翻译。
 SPEECH_ENGINES: dict[str, dict[str, Any]] = {
@@ -125,11 +125,11 @@ class Settings:
         return data
 
 
-def load() -> Settings:
-    if not SETTINGS_PATH.exists():
+def load(ws: config.Workspace) -> Settings:
+    if not ws.settings.exists():
         return Settings()
     try:
-        raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        raw = json.loads(ws.settings.read_text(encoding="utf-8"))
     except Exception:
         return Settings()
     return Settings(
@@ -147,7 +147,7 @@ def load() -> Settings:
     )
 
 
-def save(current: Settings, patch: dict) -> Settings:
+def save(ws: config.Workspace, current: Settings, patch: dict) -> Settings:
     """按界面提交的内容合并。api_key 留空表示不改动，不是清空。"""
     for section in ("text", "speech"):
         incoming = (patch.get(section) or {})
@@ -174,8 +174,8 @@ def save(current: Settings, patch: dict) -> Settings:
     if patch.get("chunk_seconds"):
         current.chunk_seconds = max(1.5, min(10.0, float(patch["chunk_seconds"])))
 
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(
+    ws.root.mkdir(parents=True, exist_ok=True)
+    ws.settings.write_text(
         json.dumps(asdict(current), ensure_ascii=False, indent=2), encoding="utf-8")
-    SETTINGS_PATH.chmod(0o600)  # 里面有 api key
+    ws.settings.chmod(0o600)  # 里面有 api key
     return current

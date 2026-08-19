@@ -23,9 +23,7 @@ from .settings import Engine
 
 log = logging.getLogger(__name__)
 
-DOCS_DIR = config.DATA_DIR / "docs"
-INDEX_PATH = config.DATA_DIR / "index.json"
-TRASH_DIR = config.DATA_DIR / "trash"
+# 路径一律由 config.Workspace 给，不留进程级常量，见那里的说明
 
 CHUNK_CHARS = 700
 CHUNK_OVERLAP = 120
@@ -40,21 +38,21 @@ def _safe_name(name: str) -> str:
     return (stem or "未命名") + (".txt" if not stem.endswith(".txt") else "")
 
 
-def store_doc(name: str, text: str) -> None:
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    (DOCS_DIR / _safe_name(name)).write_text(text, encoding="utf-8")
+def store_doc(ws: config.Workspace, name: str, text: str) -> None:
+    ws.docs.mkdir(parents=True, exist_ok=True)
+    (ws.docs / _safe_name(name)).write_text(text, encoding="utf-8")
 
 
-def list_docs() -> list[dict]:
-    if not DOCS_DIR.exists():
+def list_docs(ws: config.Workspace) -> list[dict]:
+    if not ws.docs.exists():
         return []
     return sorted(
         ({"name": p.stem, "chars": len(p.read_text(encoding="utf-8", errors="replace"))}
-         for p in DOCS_DIR.glob("*.txt")),
+         for p in ws.docs.glob("*.txt")),
         key=lambda d: d["name"])
 
 
-def _recycle(paths: list[Path]) -> Path | None:
+def _recycle(ws: config.Workspace, paths: list[Path]) -> Path | None:
     """删掉的原文挪进 data/trash/<时间戳>/，不真删。
 
     会前底稿是手工整理出来的，一次误点清空、或者哪个脚本顺手发一条 DELETE，就再也找不回来。
@@ -63,7 +61,7 @@ def _recycle(paths: list[Path]) -> Path | None:
     items = [p for p in paths if p.exists()]
     if not items:
         return None
-    bin_dir = TRASH_DIR / time.strftime("%Y%m%d-%H%M%S")
+    bin_dir = ws.trash / time.strftime("%Y%m%d-%H%M%S")
     bin_dir.mkdir(parents=True, exist_ok=True)
     for p in items:
         target = bin_dir / p.name
@@ -77,26 +75,26 @@ def _recycle(paths: list[Path]) -> Path | None:
     return bin_dir
 
 
-def remove_doc(name: str) -> bool:
-    path = DOCS_DIR / _safe_name(name)
+def remove_doc(ws: config.Workspace, name: str) -> bool:
+    path = ws.docs / _safe_name(name)
     if path.exists():
-        _recycle([path])
-        INDEX_PATH.unlink(missing_ok=True)
+        _recycle(ws, [path])
+        ws.index.unlink(missing_ok=True)
         return True
     return False
 
 
-def clear_docs() -> Path | None:
+def clear_docs(ws: config.Workspace) -> Path | None:
     """清空已存原文，返回这批文件挪去了哪个回收站目录。"""
-    bin_dir = _recycle(sorted(DOCS_DIR.glob("*.txt"))) if DOCS_DIR.exists() else None
-    INDEX_PATH.unlink(missing_ok=True)
+    bin_dir = _recycle(ws, sorted(ws.docs.glob("*.txt"))) if ws.docs.exists() else None
+    ws.index.unlink(missing_ok=True)
     return bin_dir
 
 
-def all_text(limit: int = 120_000) -> str:
+def all_text(ws: config.Workspace, limit: int = 120_000) -> str:
     """所有已存原文拼在一起，供底稿提炼。"""
     blocks = []
-    for p in sorted(DOCS_DIR.glob("*.txt")) if DOCS_DIR.exists() else []:
+    for p in sorted(ws.docs.glob("*.txt")) if ws.docs.exists() else []:
         blocks.append(f"【{p.stem}】\n{p.read_text(encoding='utf-8', errors='replace')}")
     return "\n\n".join(blocks)[:limit]
 
@@ -150,7 +148,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-async def rebuild_index(engine: Engine, model: str) -> int:
+async def rebuild_index(ws: config.Workspace, engine: Engine, model: str) -> int:
     """把所有原文切块算向量存下来。上传或删除文件之后调一次。
 
     每块带上所在小节的标题，检索命中后模型能看出出处。带标题的小节另建一条「标题索引」：
@@ -158,7 +156,7 @@ async def rebuild_index(engine: Engine, model: str) -> int:
     对方提问的措辞和手册里预设的问题天然是同一类句子，标题对标题的匹配比对正文段落准。
     """
     entries: list[dict] = []
-    for path in sorted(DOCS_DIR.glob("*.txt")) if DOCS_DIR.exists() else []:
+    for path in sorted(ws.docs.glob("*.txt")) if ws.docs.exists() else []:
         text = path.read_text(encoding="utf-8", errors="replace")
         for title, body in sections(text):
             for piece in chunk(body):
@@ -169,7 +167,7 @@ async def rebuild_index(engine: Engine, model: str) -> int:
                                 "text": f"【{title}】\n{body.strip()[:800]}",
                                 "embed": title})
     if not entries:
-        INDEX_PATH.unlink(missing_ok=True)
+        ws.index.unlink(missing_ok=True)
         return 0
     if len(entries) > MAX_INDEX_CHUNKS:
         log.warning("原文切出 %d 块，超过上限 %d，只索引前面的部分。"
@@ -190,28 +188,29 @@ async def rebuild_index(engine: Engine, model: str) -> int:
     await asyncio.gather(*(fill(b) for b in batches))
 
     entries = [e for e in entries if e.get("vec")]
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    INDEX_PATH.write_text(json.dumps({"model": model, "entries": entries},
-                                     ensure_ascii=False), encoding="utf-8")
+    ws.root.mkdir(parents=True, exist_ok=True)
+    ws.index.write_text(json.dumps({"model": model, "entries": entries},
+                                   ensure_ascii=False), encoding="utf-8")
     log.info("底稿索引建好：%d 块，模型 %s", len(entries), model)
     return len(entries)
 
 
-def index_size() -> int:
-    if not INDEX_PATH.exists():
+def index_size(ws: config.Workspace) -> int:
+    if not ws.index.exists():
         return 0
     try:
-        return len(json.loads(INDEX_PATH.read_text(encoding="utf-8")).get("entries", []))
+        return len(json.loads(ws.index.read_text(encoding="utf-8")).get("entries", []))
     except Exception:
         return 0
 
 
-async def search(engine: Engine, model: str, query: str, k: int = 3) -> list[dict]:
+async def search(ws: config.Workspace, engine: Engine, model: str, query: str,
+                 k: int = 3) -> list[dict]:
     """按相似度取最相关的几块原文。索引不存在就返回空，不报错，拟稿照常走摘要。"""
-    if not INDEX_PATH.exists() or not query.strip():
+    if not ws.index.exists() or not query.strip():
         return []
     try:
-        data = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+        data = json.loads(ws.index.read_text(encoding="utf-8"))
     except Exception:
         return []
     entries = data.get("entries") or []

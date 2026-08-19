@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import json
 import subprocess
 import sys
@@ -19,8 +20,10 @@ import httpx
 import websockets
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-BASE = "http://127.0.0.1:8787"
-WS = "ws://127.0.0.1:8787/ws/live"
+# 端口可用 MI_PORT 覆盖，好在不打扰正在跑的实例的前提下验证改动
+PORT = os.environ.get("MI_PORT", "8787")
+BASE = f"http://127.0.0.1:{PORT}"
+WS = f"ws://127.0.0.1:{PORT}/ws/live"
 CHUNK = 3200
 
 SAMPLES = {
