@@ -33,12 +33,14 @@ def main() -> int:
         page.wait_for_selector(".sheet h2")
 
         # 语音层的 base url 与 model 必须是真值，不是占位
-        speech_url = page.eval_on_selector_all(
-            ".sheet input", "els => els.map(e => e.value)")
-        filled = any("maas.aliyuncs.com" in v or "dashscope" in v or "generativelanguage" in v
-                     for v in speech_url)
-        print("  语音层默认值已填进框里 →", filled)
+        vals = page.eval_on_selector_all(".sheet input", "els => els.map(e => e.value)")
+        filled = any("livetranslate" in v or "generativelanguage" in v for v in vals)
+        print("  语音层默认模型已填进框里 →", filled)
         ok &= filled
+        # 带 <> 的是模板不是真地址，填进框会被当成已配好存下去
+        no_template = not any("<" in v for v in vals)
+        print("  框里没有 <占位符> →", no_template, [v for v in vals if "<" in v])
+        ok &= no_template
 
         # 把文本层切成智谱，应当出现「不做实时字幕」的提示
         page.select_option(".sheet select >> nth=0", label="智谱（不做实时字幕）")

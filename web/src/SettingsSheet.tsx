@@ -11,6 +11,11 @@ const PROVIDERS: { label: string; base_url: string; speech: boolean }[] = [
   { label: "OpenAI", base_url: "https://api.openai.com/v1", speech: false },
 ];
 
+/** 只有不含 <占位符> 的默认值才配填进输入框，其余留作灰字提示。 */
+function usable(v?: string): string {
+  return v && !v.includes("<") ? v : "";
+}
+
 function providerOf(baseUrl: string) {
   const u = (baseUrl || "").toLowerCase();
   if (u.includes("aliyuncs.com")) return PROVIDERS[0];
@@ -88,13 +93,15 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
       .then((j) => {
         const eng = j.engines?.[j.settings.speech_engine];
         // 默认值要真的填进去。原来只当灰字占位摆着，用户以为已经配好了，
-        // 结果点开始记录没有字幕（实战反馈）
+        // 结果点开始记录没有字幕（实战反馈）。
+        // 但带 <> 的是模板不是真地址（百炼是每个人自己的 workspace 域名），
+        // 填进框会被当成已配好存下去，那种只能留作灰字提示。
         setData({
           ...j.settings,
           speech: {
             ...j.settings.speech,
-            base_url: j.settings.speech.base_url || eng?.defaults?.base_url || "",
-            model: j.settings.speech.model || eng?.defaults?.model || "",
+            base_url: j.settings.speech.base_url || usable(eng?.defaults?.base_url),
+            model: j.settings.speech.model || usable(eng?.defaults?.model),
           },
         });
         setEngines(j.engines);
