@@ -2,6 +2,14 @@ import workletUrl from "./pcm-worklet.js?url";
 
 export type SourceMode = "tab" | "mic" | "both";
 
+/** 手机上的 Safari 与 Chrome 都没有 getDisplayMedia，抓会议标签页那条路走不通，
+ *  界面上就不该给这个选项，否则用户点了只会得到一句报错。 */
+export function canCaptureTab(): boolean {
+  return typeof navigator !== "undefined"
+    && !!navigator.mediaDevices
+    && typeof navigator.mediaDevices.getDisplayMedia === "function";
+}
+
 const SAMPLE_RATE = 16000;
 const FRAME_SAMPLES = 1600; // 100ms
 

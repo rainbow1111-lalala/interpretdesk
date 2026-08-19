@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioCapture, listMics, preferredMic, type MicDevice, type SourceMode } from "./audio";
+import { AudioCapture, canCaptureTab, listMics, preferredMic, type MicDevice, type SourceMode } from "./audio";
 import { ContextSheet } from "./ContextSheet";
 import { Drafting } from "./Drafting";
 import { MinutesSheet } from "./MinutesSheet";
+import { Onboarding } from "./Onboarding";
 import { SettingsSheet } from "./SettingsSheet";
 import { Transcript } from "./Transcript";
 import type { ContextInfo, Draft, Entry, LinkState, LiveEntry } from "./types";
@@ -390,6 +391,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <Onboarding />
       <header className="topbar">
         <h1>{TODAY} 记录</h1>
         <div className="pipe" />
@@ -504,11 +506,13 @@ export default function App() {
                 disabled={running}
                 onChange={(e) => setSource(e.target.value as SourceMode)}
               >
-                {(Object.keys(SOURCE_LABEL) as SourceMode[]).map((m) => (
-                  <option key={m} value={m}>
-                    {SOURCE_LABEL[m]}
-                  </option>
-                ))}
+                {(Object.keys(SOURCE_LABEL) as SourceMode[])
+                  .filter((m) => m === "mic" || canCaptureTab())
+                  .map((m) => (
+                    <option key={m} value={m}>
+                      {SOURCE_LABEL[m]}
+                    </option>
+                  ))}
               </select>
               {source !== "tab" && mics.length > 0 && (
                 <select

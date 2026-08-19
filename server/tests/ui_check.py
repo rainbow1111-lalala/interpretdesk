@@ -105,6 +105,10 @@ def main() -> int:
 
         page.goto(BASE)
         page.wait_for_selector(".rec-btn")
+        # 首次进入的使用提示会盖住整页，先关掉再操作
+        if page.query_selector(".onboard-ok"):
+            page.click(".onboard-ok")
+            page.wait_for_selector(".onboard", state="detached")
         page.screenshot(path=str(SHOTS / "01-待机.png"))
         print("待机界面已截图")
 

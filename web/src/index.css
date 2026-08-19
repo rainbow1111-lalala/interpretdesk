@@ -748,3 +748,239 @@ a.mini {
   border: 1px solid var(--rule);
   display: inline-block;
 }
+
+/* ── 手机端（上下分屏）─────────────────────────────────
+   两栏并排在手机上排不下：右栏最小宽度写死 360 像素，一台 390 宽的手机会被挤爆。
+   改成上下各占一半，笔录在上、拟稿在下，两边都看得见，会上不用来回切。
+   断点取 820，因为竖屏平板也该按这套排。 */
+@media (max-width: 820px) {
+  :root {
+    --gutter: 52px;
+  }
+
+  /* iOS Safari 的地址栏会伸缩，100% 高度会被工具栏盖掉一截，用动态视口单位 */
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+
+  .topbar {
+    height: auto;
+    min-height: 48px;
+    padding: 6px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .topbar h1 {
+    font-size: 14px;
+  }
+
+  /* 竖排两行，各占一半，中间用横线分隔而不是竖线 */
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .column + .column {
+    border-left: none;
+    border-top: 1px solid var(--rule);
+  }
+
+  .column-head {
+    padding: 10px 14px 8px;
+  }
+
+  /* 录音条固定在底部，两行高。这里给整个工作区留出等高的空档，
+     否则拟稿栏的输入框会被它整个盖住（实测 iPhone 14 上就是这样） */
+  .workspace {
+    padding-bottom: calc(104px + env(safe-area-inset-bottom));
+  }
+
+  .record {
+    padding: 0 14px 16px;
+  }
+
+  .entry {
+    padding: 12px 0;
+  }
+
+  .thread {
+    padding: 0 14px 14px;
+    gap: 12px;
+  }
+
+  .card .en {
+    font-size: 15px;
+    padding: 13px 14px 0;
+  }
+
+  .card .zh {
+    padding: 10px 14px 0;
+  }
+
+  .card .actions {
+    padding: 10px 10px 10px 14px;
+    flex-wrap: wrap;
+  }
+
+  .composer {
+    padding: 10px 12px 12px;
+  }
+
+  /* 录音条改成贴底整条，居中药丸在手机上放不下开始键加计时加电平加两个下拉。
+     底部留出 iOS 的安全区，否则会被小白条压住 */
+  .recorder {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
+    width: 100%;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    justify-content: center;
+    /* 一行放不下开始键加计时加电平加两个下拉，实测两端会被切掉。改成折行两排：
+       上排是开始键、计时、电平，下排是两个下拉，各占一半 */
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 20px rgba(25, 28, 26, 0.08);
+  }
+
+  .recorder .meter {
+    flex: none;
+  }
+
+  /* 手指点得到：苹果的人机指南给的是 44 点 */
+  .rec-btn {
+    min-height: 44px;
+    padding: 10px 18px;
+    font-size: 14px;
+  }
+
+  .recorder select {
+    flex: 1 1 44%;
+    min-width: 0;
+    max-width: none;
+    font-size: 13px;
+  }
+
+  /* 下拉另起一排：让第一个下拉前面强制换行 */
+  .recorder select:first-of-type {
+    margin-left: 0;
+  }
+
+  .recorder .pipe {
+    display: none;
+  }
+
+  .chip,
+  .mini {
+    min-height: 34px;
+  }
+
+  .sheet {
+    padding: 20px 16px 40px;
+  }
+}
+
+/* 屏幕特别矮时（横屏手机）分屏两边都太挤，改成笔录压缩、拟稿吃满剩下的 */
+@media (max-width: 820px) and (max-height: 520px) {
+  .workspace {
+    grid-template-rows: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  }
+}
+
+/* ── 首次进入的使用提示 ─────────────────────────────── */
+
+.onboard-bg {
+  position: fixed;
+  inset: 0;
+  background: rgba(25, 28, 26, 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 40;
+}
+
+.onboard {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 26px 26px 20px;
+  width: min(440px, 100%);
+  max-height: 88dvh;
+  overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(25, 28, 26, 0.18);
+}
+
+.onboard h2 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 20px;
+  margin: 0 0 14px;
+}
+
+.onboard h3 {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--mute);
+  margin: 18px 0 8px;
+  font-weight: 500;
+}
+
+.onboard p {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+.onboard-lead {
+  color: var(--slate);
+}
+
+.onboard .yes,
+.onboard .no {
+  display: inline-block;
+  min-width: 38px;
+  margin-right: 8px;
+  font-size: 12px;
+  text-align: center;
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+.onboard .yes {
+  background: var(--seal-soft);
+  color: var(--seal);
+}
+
+.onboard .no {
+  background: #f1f3f1;
+  color: var(--slate);
+}
+
+.onboard-foot {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 12px;
+  color: var(--mute);
+  line-height: 1.6;
+}
+
+.onboard-ok {
+  margin-top: 14px;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 14px;
+}
