@@ -38,6 +38,9 @@ SINGLE_USER_ENV = "MI_SINGLE_USER"
 # 一份会前底稿几十万字也就几兆，一次 20 兆、一个会话总共 60 兆足够宽松。
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_SESSION_BYTES = 60 * 1024 * 1024
+# 体积限额挡不住一堆小文件：几百份几十 KB 的文本同样能把向量索引撑爆、把提炼拖垮。
+# 一场会的会前材料十份足够宽松，真实用过的两份合计七万多字。
+MAX_SESSION_DOCS = 10
 
 
 def single_user() -> bool:

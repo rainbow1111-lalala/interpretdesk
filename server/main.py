@@ -260,8 +260,16 @@ async def post_context(files: list[UploadFile] = File(default=[]),
             dest.write_bytes(blob)
             paths.append(dest)
         # 单次限额挡不住反复上传，会话总量也要看住
-        stored = sum(p.stat().st_size for p in s.ws.docs.glob("*.txt")) \
-            if s.ws.docs.exists() else 0
+        stored_paths = list(s.ws.docs.glob("*.txt")) if s.ws.docs.exists() else []
+        stored = sum(p.stat().st_size for p in stored_paths)
+        # replace=True 旧原文进回收站，只数本次这批
+        kept = 0 if replace else len(stored_paths)
+        if kept + len(paths) > config.MAX_SESSION_DOCS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"一个会话最多存 {config.MAX_SESSION_DOCS} 份底稿，"
+                       f"当前已存 {kept} 份、本次 {len(paths)} 份。"
+                       f"请先删掉用不上的，或选「换成新底稿」")
         if not replace and stored + total > config.MAX_SESSION_BYTES:
             raise HTTPException(
                 status_code=413,

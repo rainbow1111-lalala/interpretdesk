@@ -117,6 +117,14 @@ def main_check() -> int:
     checks["超限后底稿没被动过"] = (
         [d["name"] for d in jia.get("/api/context").json()["docs"]] == [])
 
+    # 份数上限：一次超过 MAX_SESSION_DOCS 份要被挡住，且不写盘
+    many = [("files", (f"第{i}份.txt", b"x" * 32, "text/plain"))
+            for i in range(config.MAX_SESSION_DOCS + 1)]
+    r = jia.post("/api/context", files=many, data={"replace": "false"})
+    checks["超份数上传被挡且回 413"] = r.status_code == 413
+    checks["超份数后底稿仍为空"] = (
+        [d["name"] for d in jia.get("/api/context").json()["docs"]] == [])
+
     # 两个会话确实落在不同目录
     dirs = sorted(p.name for p in (tmp / "sessions").iterdir() if p.is_dir())
     checks["磁盘上是两个独立目录"] = len(dirs) == 2
