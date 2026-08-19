@@ -77,7 +77,6 @@ export default function App() {
   const entryCount = useRef(0);
   const autoReplyRef = useRef(true);
   const draftingRef = useRef(false);
-  const autoDraftId = useRef<number | null>(null);
   const autoTimer = useRef<number | undefined>(undefined);
   // ws 回调建立在 start 里，而 runDraft 声明在 start 之后，经 ref 转一道避免引用顺序问题
   const runDraftRef = useRef<
@@ -222,7 +221,8 @@ export default function App() {
           case "turn": {
             setEntries((prev) => [...prev, msg as Entry]);
             setLive((prev) => (prev && prev.turnId === msg.turnId ? null : prev));
-            // 对方讲完一段外语，右栏自动给一版建议回复。同一张「自动」卡原地更新不刷屏。
+            // 对方讲完一段外语，右栏自动给一版建议回复。每次触发新建一张卡追加进对话流，
+            // 旧卡保留可回看，不原地覆盖（实战反馈：上一版建议不能直接消失）。
             // 只等 250 毫秒去抖连续收口：检索片段是后台预取、拿现成的，多等换不来新片段
             const t = msg as Entry;
             const spoken = t.pairs.map((p) => p.src).join(" ").trim();
@@ -237,8 +237,7 @@ export default function App() {
                   autoTimer.current = window.setTimeout(fire, 300);
                   return;
                 }
-                const id = autoDraftId.current ?? draftId.current++;
-                autoDraftId.current = id;
+                const id = draftId.current++;
                 answeringRef.current = spoken.slice(0, 40);
                 // 强档热连接首字实测 1.3-1.5 秒，达到快档同一档位，换更聪明的模型
                 runDraftRef.current?.(AUTO_INSTRUCTION, "good", id, true);

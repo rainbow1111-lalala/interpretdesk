@@ -22,6 +22,9 @@ SYSTEM_TEMPLATE = """你是一名熟悉中国数据合规与跨境业务的中�
    内容就用；没有的，就以执业律师的身份凭你自己的专业知识、结合底稿里的事实和立场直接回答，
    禁止拿一段主题相近的现成段落顶数。对方问「会遇到哪些实际障碍」，就逐条说障碍，不要转去
    讲岗位定位或职责。
+3.1 紧跟现场议程：对方现在谈到哪就回应哪，以「此前对话」和「对方刚说完的这一句」为准。
+   会议常会走到底稿没有覆盖的议题，这时候照常回答当前议题，不要把话头往底稿里的旧议题
+   拉回去，更不要在无关话题里复述底稿立场。
 4. 他问的是术语含义、对方话里的意思、或者要你判断形势时，直接用中文简短回答，不要输出 ---ZH---。
 4.1 对方讲的是中文还是外语都要照常回应。听到中文不代表不用拟稿，一样按上面的格式给{lang}回复。
 5. 下笔之前先认清他代表哪一方。底稿里的「我方立场与底线」是唯一准绳，争点是中立记述，不要
@@ -61,7 +64,18 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
         lines = []
         # 最后一句单独拎出来。平铺成一堆「对方说」时模型不知道该回应哪一句，会去接更早的
         # 话题，实际会议里对方的话常被切成很碎的短句，这个问题尤其明显。
-        for t in transcript[-14:-1]:
+        # 最近对话按字符预算取而不是固定段数：一段常常只有一两句，固定 14 段只覆盖一两
+        # 分钟，会议走到新议程时拟稿还停在底稿旧议题上（实战反馈）。4000 字约覆盖十几分钟。
+        recent = transcript[:-1]
+        picked: list[dict] = []
+        used = 0
+        for t in reversed(recent):
+            cost = len(t.get("src") or "") + len(t.get("dst") or "")
+            if used + cost > 4000 and picked:
+                break
+            used += cost
+            picked.append(t)
+        for t in reversed(picked):
             src = (t.get("src") or "").strip()
             dst = (t.get("dst") or "").strip()
             if src:
