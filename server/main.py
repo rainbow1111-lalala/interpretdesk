@@ -361,6 +361,8 @@ async def search_docs(payload: dict, s: State = Depends(current)) -> dict:
 async def post_draft(payload: dict, s: State = Depends(current)) -> StreamingResponse:
     instruction = (payload.get("instruction") or "").strip()
     history = payload.get("history") or []
+    # 他手打的要求（自动建议那条固定指令不算），会中改口靠它一直生效
+    directives = [str(d).strip() for d in (payload.get("directives") or []) if str(d).strip()]
     quality = payload.get("quality") or "fast"
     if not instruction:
         return StreamingResponse(iter(["data: \n\n"]), media_type="text/event-stream")
@@ -369,7 +371,7 @@ async def post_draft(payload: dict, s: State = Depends(current)) -> StreamingRes
         try:
             async for chunk in drafting.stream_draft(
                     s.ws, s.context, s.turns, history, instruction, quality,
-                    s.excerpts):
+                    s.excerpts, directives):
                 yield f"data: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
         except Exception as exc:
             log.exception("拟稿失败")

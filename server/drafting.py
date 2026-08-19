@@ -29,6 +29,10 @@ SYSTEM_TEMPLATE = """你是一名熟悉中国数据合规与跨境业务的中�
 4.1 对方讲的是中文还是外语都要照常回应。听到中文不代表不用拟稿，一样按上面的格式给{lang}回复。
 5. 下笔之前先认清他代表哪一方。底稿里的「我方立场与底线」是唯一准绳，争点是中立记述，不要
    照着争点里对方的主张写。凡是与我方立场相反的表态，一律不得出现在英文里。
+5.1 【会中指示】一节是他在这场会里当场给你的话，与会前底稿冲突时以会中指示为准；指示按
+   先后顺序排列，后面的覆盖前面的。他说了不用某个方案、换个方向之后，回复里就不要再把
+   旧方案当作我方的主张来讲，改按新方向回答对方眼下的问题。对方直接问到旧方案，或者需要
+   说明为什么不再采用它，照实回应即可，不必回避。拿不准他是否推翻过，以最新那条指示为准。
 6. 如果他的要求与底稿记载的立场冲突，先按他的要求写，写完在中文对照之后另起一行，用
    「提示：」开头，用不超过四十字点出冲突在哪里，由他决定。没有冲突就不要写这一行，也不要
    写「此回复符合底线」这类确认话。
@@ -49,7 +53,8 @@ def system_prompt(reply_lang: str) -> str:
 
 def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict],
                  instruction: str, excerpts: list[dict] | None = None,
-                 full_text: str = "", reply_lang: str = "English") -> str:
+                 full_text: str = "", reply_lang: str = "English",
+                 directives: list[str] | None = None) -> str:
     """稳定的内容放最前，变动的放最后。
 
     原文与底稿摘要每次都一样，把它们放在提示词开头，服务端的上下文缓存才能命中同一段前缀；
@@ -95,10 +100,17 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
                 block += f"\n（译）{last_dst}"
             parts.append(block)
     if history:
+        # 取到 12 条（约六轮）。原来是 6 条，而自动建议每出一张卡就占掉两条，
+        # 他手打的指示三张自动卡之后就被挤出窗口，模型于是继续按被推翻的旧方案回答
         turns = [f"{'我' if h.get('role') == 'user' else '助手'}：{h.get('text','').strip()}"
-                 for h in history[-6:] if h.get("text")]
+                 for h in history[-12:] if h.get("text")]
         if turns:
             parts.append("【此前交互】\n" + "\n".join(turns))
+    if directives:
+        # 他手打的要求单独立一节，且不受上面那个窗口的挤压。会中改口（不用某方案、换方向）
+        # 必须一直有效，被历史截断挤掉就等于当场失忆
+        parts.append("【会中指示，按先后顺序，一直有效，效力高于会前底稿】\n"
+                     + "\n".join(f"{i}. {d}" for i, d in enumerate(directives, 1)))
     if excerpts:
         blocks = [f"（{e['doc']}）{e['text']}" for e in excerpts]
         parts.append("【底稿原文里可能相关的片段，只在确实能回答对方问题时引用】\n" + "\n\n".join(blocks))
@@ -116,7 +128,8 @@ def build_prompt(ctx: MeetingContext, transcript: list[dict], history: list[dict
 
 async def stream_draft(ws: config.Workspace, ctx: MeetingContext, transcript: list[dict],
                        history: list[dict], instruction: str, quality: str = "fast",
-                       excerpts: list[dict] | None = None) -> AsyncIterator[str]:
+                       excerpts: list[dict] | None = None,
+                       directives: list[str] | None = None) -> AsyncIterator[str]:
     cfg = settings_mod.load(ws)
     if not cfg.text.ready():
         raise RuntimeError("还没配文本模型，先在模型设置里填 base URL 与 model name")
@@ -130,7 +143,7 @@ async def stream_draft(ws: config.Workspace, ctx: MeetingContext, transcript: li
              len(full_text), len(excerpts or []), model)
 
     prompt = build_prompt(ctx, transcript, history, instruction, excerpts, full_text,
-                          cfg.reply_lang)
+                          cfg.reply_lang, directives)
     async for chunk in llm.stream(cfg.text, model, prompt,
                                   system_prompt(cfg.reply_lang), temperature=0.4):
         yield chunk

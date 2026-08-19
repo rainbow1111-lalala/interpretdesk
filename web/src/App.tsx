@@ -331,12 +331,17 @@ export default function App() {
         { role: "user", text: d.instruction },
         { role: "model", text: d.en },
       ]);
+      // 我手打的要求单独送一份。自动建议那条固定指令不算指示，混进去只会稀释真正的改口
+      const directives = drafts
+        .filter((d) => !d.auto && d.instruction.trim())
+        .map((d) => d.instruction.trim())
+        .slice(-8);
 
       try {
         const r = await fetch("/api/draft", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ instruction, history, quality }),
+          body: JSON.stringify({ instruction, history, quality, directives }),
         });
         if (!r.ok || !r.body) throw new Error(`服务端返回 ${r.status}`);
         const reader = r.body.getReader();
