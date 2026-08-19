@@ -241,21 +241,25 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
                 placeholder="qwen-max"
                 onChange={(v) => patch((d) => ({ ...d, text_model_strong: v }))}
               />
-              <Field
-                label="向量模型（底稿原文检索用，走同一个端点）"
-                list="mi-models"
-                value={data.embed_model}
-                placeholder="text-embedding-v4"
-                onChange={(v) => patch((d) => ({ ...d, embed_model: v }))}
-              />
-              <Field
-                label="底稿原文直接进上下文的字数上限（超出部分改用检索补）"
-                value={String(data.context_full_chars)}
-                placeholder="20000"
-                onChange={(v) =>
-                  patch((d) => ({ ...d, context_full_chars: Number(v.replace(/\D/g, "")) || 0 }))
-                }
-              />
+              {/* 这两项有可用的默认值，普通用户一次都不用碰，收起来 */}
+              <details className="advanced">
+                <summary>高级</summary>
+                <Field
+                  label="向量模型（留空自动挑，只影响超长底稿的原文检索）"
+                  list="mi-models"
+                  value={data.embed_model}
+                  placeholder="留空即可"
+                  onChange={(v) => patch((d) => ({ ...d, embed_model: v }))}
+                />
+                <Field
+                  label="底稿原文直接进上下文的字数上限（超出部分改用检索补）"
+                  value={String(data.context_full_chars)}
+                  placeholder="50000"
+                  onChange={(v) =>
+                    patch((d) => ({ ...d, context_full_chars: Number(v.replace(/\D/g, "")) || 0 }))
+                  }
+                />
+              </details>
               <div className="row">
                 <button className="mini" onClick={() => runTest("text")}>
                   测试快档

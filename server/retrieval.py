@@ -155,6 +155,10 @@ async def rebuild_index(ws: config.Workspace, engine: Engine, model: str) -> int
     向量按标题算（entry 里的 embed 字段），命中返回整节开头。问答手册这类 FAQ 文档，
     对方提问的措辞和手册里预设的问题天然是同一类句子，标题对标题的匹配比对正文段落准。
     """
+    model = await llm.resolve_embed_model(engine, model)
+    if not model:
+        log.warning("没有可用的向量模型，跳过建索引；底稿照常可用，只是查不了原文")
+        return 0
     entries: list[dict] = []
     for path in sorted(ws.docs.glob("*.txt")) if ws.docs.exists() else []:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -212,6 +216,9 @@ async def search(ws: config.Workspace, engine: Engine, model: str, query: str,
     try:
         data = json.loads(ws.index.read_text(encoding="utf-8"))
     except Exception:
+        return []
+    model = await llm.resolve_embed_model(engine, model)
+    if not model:
         return []
     entries = data.get("entries") or []
     if not entries:

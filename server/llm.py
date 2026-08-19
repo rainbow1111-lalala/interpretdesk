@@ -6,12 +6,15 @@ Kimi、通义、OpenRouter，以及本机 vLLM 或 Ollama。api_key 留空时不
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import AsyncIterator
 
 import httpx
 
 from .settings import Engine
+
+log = logging.getLogger(__name__)
 
 
 def _headers(engine: Engine) -> dict[str, str]:
@@ -173,3 +176,30 @@ async def list_models(engine: Engine) -> list[str]:
         return sorted({m.get("id", "") for m in (items or []) if m.get("id")})
     except Exception:
         return []
+
+
+_embed_pick: dict[str, str] = {}
+
+
+async def resolve_embed_model(engine: Engine, configured: str) -> str:
+    """向量模型留空就从端点的模型清单里自己挑一个。
+
+    这个字段本来要用户手填，而他填错的代价很隐蔽：索引建不成只写一行日志，底稿照常能用，
+    只是会议中查不了原文。实测有用户把阿里的 text-embedding-v4 填到智谱端点上。
+    名字里带 embed 的就是向量模型，这条约定所有服务商都遵守，挑不到就返回空，
+    检索这一路自然停用，不影响其他功能。结果按端点缓存，不必每次都拉清单。
+    """
+    if configured.strip():
+        return configured.strip()
+    key = engine.base_url
+    if key in _embed_pick:
+        return _embed_pick[key]
+    picked = ""
+    for m in await list_models(engine):
+        if "embed" in m.lower():
+            picked = m
+            break
+    _embed_pick[key] = picked
+    if picked:
+        log.info("向量模型留空，自动选用 %s", picked)
+    return picked

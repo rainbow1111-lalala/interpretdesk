@@ -1003,3 +1003,29 @@ a.mini {
   background: var(--seal-soft);
   color: var(--seal);
 }
+
+/* 设置里的高级项，默认收起 */
+.advanced {
+  margin: 4px 0 12px;
+}
+
+.advanced > summary {
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--mute);
+  padding: 6px 0;
+  list-style: none;
+}
+
+.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced > summary::before {
+  content: "＋ ";
+}
+
+.advanced[open] > summary::before {
+  content: "－ ";
+}

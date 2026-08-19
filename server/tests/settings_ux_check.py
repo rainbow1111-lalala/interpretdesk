@@ -53,6 +53,17 @@ def main() -> int:
         print("  服务商预设填好了 base url →", "bigmodel.cn" in url_val, f"（{url_val}）")
         ok &= "bigmodel.cn" in url_val
 
+        # 向量模型不该出现在默认视野里：它有可用默认值（留空自动挑），普通用户不必知道
+        hidden = page.eval_on_selector(
+            ".advanced", "e => !e.open && e.querySelector('input') !== null")
+        print("  向量模型默认收在高级里 →", hidden)
+        ok &= bool(hidden)
+        page.click(".advanced > summary")
+        page.wait_for_timeout(200)
+        opened = page.eval_on_selector(".advanced", "e => e.open")
+        print("  点开高级能看到 →", opened)
+        ok &= bool(opened)
+
         page.screenshot(path=str(SHOTS / "设置-智谱.png"), full_page=True)
         browser.close()
     print(f"截图在 {SHOTS}")

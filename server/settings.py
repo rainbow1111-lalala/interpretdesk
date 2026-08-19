@@ -94,7 +94,8 @@ class Settings:
     text: Engine = field(default_factory=Engine)
     text_model_strong: str = ""
     # 底稿原文检索用的向量模型，走文本层同一个端点与 key
-    embed_model: str = "text-embedding-v4"
+    # 留空表示自动：从端点模型清单里挑名字带 embed 的那个，见 llm.resolve_embed_model
+    embed_model: str = ""
     # 拟稿时直接放进上下文的底稿原文字数上限。超出的部分改由向量检索补相关片段。
     # 实测首字延迟：1.5k 字 1.6 秒，19.3k 字 1.8 到 3.3 秒，40k 字 5.05 秒。会议里首字超过
     # 3 秒就难用。定两万五是为了让两万四千字的法规要点对照完整进上下文，不在半截被切断；
@@ -136,7 +137,7 @@ def load(ws: config.Workspace) -> Settings:
         text=Engine(**{k: v for k, v in (raw.get("text") or {}).items()
                        if k in {"base_url", "api_key", "model"}}),
         text_model_strong=raw.get("text_model_strong", "") or "",
-        embed_model=raw.get("embed_model") or "text-embedding-v4",
+        embed_model=raw.get("embed_model") or "",
         context_full_chars=int(raw.get("context_full_chars") or 50_000),
         speech_engine=raw.get("speech_engine") or "qwen_livetranslate",
         speech=Engine(**{k: v for k, v in (raw.get("speech") or {}).items()
@@ -161,8 +162,8 @@ def save(ws: config.Workspace, current: Settings, patch: dict) -> Settings:
             engine.api_key = ""
     if "text_model_strong" in patch:
         current.text_model_strong = (patch.get("text_model_strong") or "").strip()
-    if patch.get("embed_model"):
-        current.embed_model = patch["embed_model"].strip()
+    if "embed_model" in patch:
+        current.embed_model = (patch["embed_model"] or "").strip()
     if patch.get("context_full_chars"):
         current.context_full_chars = max(0, min(200_000, int(patch["context_full_chars"])))
     if patch.get("speech_engine") in SPEECH_ENGINES:
