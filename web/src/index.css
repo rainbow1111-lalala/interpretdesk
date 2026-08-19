@@ -966,15 +966,6 @@ a.mini {
   color: var(--slate);
 }
 
-.onboard-foot {
-  margin-top: 18px;
-  padding-top: 12px;
-  border-top: 1px solid var(--rule-soft);
-  font-size: 12px;
-  color: var(--mute);
-  line-height: 1.6;
-}
-
 .onboard-ok {
   margin-top: 14px;
   width: 100%;

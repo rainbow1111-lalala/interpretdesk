@@ -27,7 +27,7 @@ export function Onboarding() {
         <h3>底稿</h3>
         <p>
           <span className="yes">传</span>
-          问答手册、法规要点、术语对照、我方立场与底线
+          问答手册、会议要点、术语对照、我方立场与底线
         </p>
         <p>
           <span className="no">别传</span>
@@ -36,11 +36,7 @@ export function Onboarding() {
 
         <h3>会中</h3>
         <p>外放收音，设备放桌上。对方说完一段，拟稿栏自动给出可以直接念的英文。</p>
-        <p>要改口就直接说，例如“回这一段，但先不接受价格调整”。</p>
-
-        <p className="onboard-foot">
-          材料上传至服务器处理，会话 7 天未使用自动删除，也可随时在会议底稿里清空。
-        </p>
+        <p>可直接在对话框要求 AI 修改拟定稿。</p>
 
         <button className="onboard-ok" onClick={close}>
           知道了
