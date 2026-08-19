@@ -1,12 +1,12 @@
 # ROADMAP · 会议同传台
 
 立项日期：2026-08-17
-当前阶段：可用版本已跑通（含段落收口后右栏自动建议回复），等真实会议验证音频链路
+当前阶段：已部署到阿里云新加坡节点，HTTP 可访问，HTTPS 证书待签
 
 ## 当前阶段
 
-后端、前端、模型接入全部打通，用合成语音与真实模型端到端验证过。唯一没验证的是浏览器抓
-会议标签页音频这一步，需要本人在真实会议里点一次共享面板。
+后端、前端、模型接入全部打通，会话隔离改造完成，多人版已部署上线（阿里云新加坡，域名
+interpretdesk.com）。当前只有明文 HTTP 可用，证书未签，因此还不能把地址给别的律师。
 
 ## 已完成（均已实测，附数据）
 
@@ -127,9 +127,28 @@
 - 回归：replay 英/中/拟稿、ui_check 在新代码单人模式下全过；clear_check、replace_check
   已适配新结构并通过。全程用 8788/8789 另起实例验证，没有重启正在开会的 8787。
 
+## 部署上线（2026-08-19，已实测）
+
+- 服务器：阿里云新加坡节点，Ubuntu，公网 IP 8.219.58.19（whois 归属 Alibaba Cloud
+  (Singapore) Private Limited）。选境外节点故不涉及 ICP 备案。原判断「Cloudflare 放不了
+  Python 长连接应用」成立，Cloudflare 现只做 DNS 解析，应用跑在自有主机上。
+- 部署方式：`deploy/pack.sh` 打包（不含 data/）→ 解到 /opt/interpretdesk →
+  `deploy/install.sh` 一次装完。服务以 systemd 管理，`interpretdesk.service`
+  active 且 enabled，uvicorn 监听 127.0.0.1:8787，nginx 反代 80 端口。
+- 实测证据：服务器本机 `curl 127.0.0.1:8787/api/health` 返回 200；带
+  `Host: interpretdesk.com` 走 nginx 同样 200。本机远端复验
+  `curl -H 'Host: interpretdesk.com' http://8.219.58.19/` 返回 200，响应头
+  `Server: nginx/1.24.0 (Ubuntu)`，并带 `set-cookie: mi_sid=...; HttpOnly; SameSite=lax`，
+  即多人会话中间件确已生效。安装脚本自测那次 404 事后不复现，带与不带 Host 现均为 200。
+- 域名解析：interpretdesk.com 与 www 两条 A 记录均指向 8.219.58.19，Cloudflare 托管
+  （NS 为 christina/donovan.ns.cloudflare.com），当前灰云 DNS only，回源 IP 直接暴露。
+
 ## 尚未完成（对外开放前必须补）
 
-- 服务器与域名：Cloudflare 放不了 Python 长连接应用，要另找主机；境内主机需备案。
+- HTTPS 证书：443 端口 TCP 可连但 TLS 握手即断（openssl 报 unexpected eof），
+  certbot 尚未执行，目前只有明文 HTTP。会话 cookie 与用户上传的底稿现在走明文传输，
+  这是把地址给别人之前的第一顺位。签完若要开 Cloudflare 橙云，SSL/TLS 必须设
+  Full (strict)。
 - ~~上传体积限制~~ 已完成：单次 20 MB、单会话累计 60 MB，超限回 413 且不动已存底稿
   （isolation_check 已加两条断言）。速率限制仍未做，公网上会被刷。
   注：每个用户填自己的 API key，模型费用不落在运营者身上，限流主要防的是服务器磁盘与 CPU。
