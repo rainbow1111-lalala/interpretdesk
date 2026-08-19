@@ -34,6 +34,11 @@ SESSIONS_DIR = DATA_DIR / "sessions"
 # 数据仍然落在 data/ 原来的位置。对外部署时绝对不能开这个开关，开了就是所有人共用一套底稿。
 SINGLE_USER_ENV = "MI_SINGLE_USER"
 
+# 上传限额。公网上的上传接口没有上限，等于让任何人把磁盘塞满，服务停摆连带别人的会议。
+# 一份会前底稿几十万字也就几兆，一次 20 兆、一个会话总共 60 兆足够宽松。
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_SESSION_BYTES = 60 * 1024 * 1024
+
 
 def single_user() -> bool:
     return os.environ.get(SINGLE_USER_ENV, "").strip() in ("1", "true", "yes")

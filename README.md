@@ -5,7 +5,7 @@
 
 ## 跑起来
 
-不需要任何环境变量，模型接入在界面里配。
+模型接入在界面里配，不写进环境变量。
 
 ```bash
 cd ~/AIwork/03-AI项目/meeting-interpreter
@@ -14,12 +14,24 @@ cd ~/AIwork/03-AI项目/meeting-interpreter
 uv sync
 cd web && npm install && npm run build && cd ..
 
-# 开会时只要这一条
-.venv/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8787
+# 自己开会时用这一条（本机单人模式，数据落在 data/ 原位）
+MI_SINGLE_USER=1 .venv/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8787
 ```
 
 然后在 Chrome 打开 http://127.0.0.1:8787 。改前端时用 `cd web && npm run dev` 开
 5173 端口，接口会代理到 8787。
+
+`MI_SINGLE_USER=1` 别漏掉。不带它启动的是公网多人模式，每个浏览器分到一个空白会话，
+你会以为自己的底稿没了（其实还在 `data/` 里，只是这个模式不从那里读）。
+
+反过来，**对外部署时绝对不能设这个变量**。设了就是所有访客共用同一份底稿与同一个 API key，
+等于把彼此的会议材料摆在一起。默认值就是安全的那一边，保持默认即可。
+
+验证改动时用 `MI_PORT` 另起一个实例，不要重启正在开会的那个：
+
+```bash
+MI_PORT=8788 python3 -m server.tests.replay
+```
 
 ## 模型设置
 

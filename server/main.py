@@ -245,14 +245,34 @@ async def post_context(files: list[UploadFile] = File(default=[]),
     tmpdir = Path(tempfile.mkdtemp(prefix="mi-ctx-"))
     try:
         paths = []
+        total = 0
         for f in files:
             if not f.filename:
                 continue
+            blob = await f.read()
+            total += len(blob)
+            if total > config.MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"这一批文件超过 {config.MAX_UPLOAD_BYTES // 1024 // 1024} MB，"
+                           f"请分批上传或先删掉用不上的文件")
             dest = tmpdir / Path(f.filename).name
-            dest.write_bytes(await f.read())
+            dest.write_bytes(blob)
             paths.append(dest)
+        # 单次限额挡不住反复上传，会话总量也要看住
+        stored = sum(p.stat().st_size for p in s.ws.docs.glob("*.txt")) \
+            if s.ws.docs.exists() else 0
+        if not replace and stored + total > config.MAX_SESSION_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"这个会话已存的底稿加上本次上传超过 "
+                       f"{config.MAX_SESSION_BYTES // 1024 // 1024} MB，"
+                       f"请先删掉用不上的文件，或选「换成新底稿」")
         s.context = await context_store.build(s.ws, paths, note, replace)
         s.drop_briefing_traces()
+    except HTTPException:
+        # 超限一类的 413 要原样回给用户，别被下面裹成 502，否则界面提示会答非所问
+        raise
     except Exception as exc:
         log.exception("底稿提炼失败")
         raise HTTPException(status_code=502,
