@@ -422,7 +422,8 @@ async def ws_live(ws: WebSocket) -> None:
             await builder.add("dst", event["text"], event.get("lang", ""),
                               bool(event.get("commit")))
         elif kind == "turn_complete":
-            await builder.close()
+            # 这段话真正结束，段内已上屏偏移清零；中途切卡的 close 不能带 final
+            await builder.close(final=True)
         elif kind == "audio":
             if want_audio:
                 await send(event)

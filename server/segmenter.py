@@ -83,8 +83,13 @@ class TurnBuilder:
     """累积当前这一段，到点收口。
 
     两类引擎的事件语义不同，必须分开处理，否则字幕会重复叠加。Gemini 那条给的是增量片段，
-    直接接在后面；百炼那条给的是当前这一句的全文，每次要覆盖，等这一句收尾（commit）再把它
-    并进已定稿的部分。cumulative 就是这个开关。
+    直接接在后面；百炼那条给的是**从这段话开头累积到当前的全文快照**（实抓原始事件核实过，
+    不是「当前一句」），每次要覆盖，收尾事件（commit）一段只来一次，带整段全文。cumulative
+    就是这个开关。
+
+    卡片可能在一段话讲完之前就被切走（超长强切、静音收口、暂停），而引擎后续快照仍带整段
+    全文。_flushed 记录本段已经随此前卡片上屏的字符数，之后的快照只取未上屏的后缀，否则
+    新卡片会把旧译文整段重播一遍。段落真正结束（close(final=True)）时清零。
     """
 
     def __init__(self, emit: Emit, glossary: dict[str, str] | None = None,
@@ -95,6 +100,8 @@ class TurnBuilder:
         self.turn_id = 0
         self._done = {"src": "", "dst": ""}
         self._cur = {"src": "", "dst": ""}
+        self._flushed = {"src": 0, "dst": 0}
+        self._seen = {"src": 0, "dst": 0}
         self.src_lang = ""
         self.dst_lang = ""
         self.first_at = 0.0
@@ -132,10 +139,15 @@ class TurnBuilder:
                 self.first_at = now
             self.last_at = now
             if self.cumulative:
-                self._cur[side] = text
+                if len(text) < self._flushed[side]:
+                    # 全文比已上屏的还短，说明引擎已开始新的一段（重连或漏了收尾事件）
+                    self._flushed[side] = 0
+                self._seen[side] = len(text)
+                fresh = text[self._flushed[side]:]
+                self._cur[side] = fresh
                 if commit:
-                    joiner = " " if self._done[side] else ""
-                    self._done[side] = f"{self._done[side]}{joiner}{text}"
+                    joiner = " " if self._done[side] and fresh else ""
+                    self._done[side] = f"{self._done[side]}{joiner}{fresh}"
                     self._cur[side] = ""
             else:
                 self._done[side] += text
@@ -159,11 +171,18 @@ class TurnBuilder:
             "echo": _is_cjk(self.src_lang, self.src),
         })
 
-    async def close(self) -> None:
+    async def close(self, final: bool = False) -> None:
+        """final=True 表示这段话真正结束（turn_complete），本段的上屏偏移随之清零；
+        False 是中途切卡（超长、静音、暂停），偏移要带到下一张卡，见类注释。"""
         async with self._lock:
-            await self._close()
+            await self._close(final)
 
-    async def _close(self) -> None:
+    async def _close(self, final: bool = False) -> None:
+        if final:
+            self._flushed = {"src": 0, "dst": 0}
+            self._seen = {"src": 0, "dst": 0}
+        else:
+            self._flushed = dict(self._seen)
         if not self.open:
             return
         payload = {

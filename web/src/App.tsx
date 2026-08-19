@@ -31,7 +31,8 @@ function clock(sec: number): string {
 // 自动建议回复用的固定指令。改这句话就是改自动回应的口径。
 // 显式要求 ---ZH--- 分隔：快档模型偶尔漏写，中文对照就不显示了
 const AUTO_INSTRUCTION =
-  "对方刚说完左边这段话。结合会议底稿，帮我拟一段可以直接说的英文回复。" +
+  "对方刚说完左边这段话。直接回应对方刚才问的那个问题，像在会上当场接话，" +
+  "帮我拟一段可以直接说出口的英文回复。" +
   "必须先输出英文，然后单独一行写 ---ZH---，再给中文对照，两部分都不能省。";
 
 const TODAY = new Date().toLocaleDateString("zh-CN", {
@@ -239,7 +240,8 @@ export default function App() {
                 const id = autoDraftId.current ?? draftId.current++;
                 autoDraftId.current = id;
                 answeringRef.current = spoken.slice(0, 40);
-                runDraftRef.current?.(AUTO_INSTRUCTION, "fast", id, true);
+                // 强档热连接首字实测 1.3-1.5 秒，达到快档同一档位，换更聪明的模型
+                runDraftRef.current?.(AUTO_INSTRUCTION, "good", id, true);
               };
               autoTimer.current = window.setTimeout(fire, 250);
             }
