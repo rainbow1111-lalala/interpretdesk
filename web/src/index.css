@@ -984,3 +984,22 @@ a.mini {
   color: #fff;
   font-size: 14px;
 }
+
+/* 设置里的配置状态条 */
+.cfg-state {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.cfg-state.ok {
+  background: #f1f5f1;
+  color: var(--slate);
+}
+
+.cfg-state.bad {
+  background: var(--seal-soft);
+  color: var(--seal);
+}
