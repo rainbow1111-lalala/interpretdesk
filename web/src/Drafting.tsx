@@ -55,9 +55,20 @@ export function Drafting({
     }, 300);
   };
 
+  // 贴底跟随：停在底部时新卡片照常把视线带下去；一旦往上翻去看之前的话就停住，
+  // 不再被新卡片拽走，翻回底部自动恢复跟随。会中翻回看上一版建议时被弹走过
+  const stick = useRef(true);
+
+  const onThreadScroll = () => {
+    const box = threadRef.current;
+    if (!box) return;
+    // 留 40 像素余量：流式写字时高度一直在长，严格等于底部几乎不成立
+    stick.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  };
+
   useEffect(() => {
     const box = threadRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
+    if (box && stick.current) box.scrollTop = box.scrollHeight;
   }, [drafts]);
 
   const send = (instruction: string) => {
@@ -69,7 +80,7 @@ export function Drafting({
 
   return (
     <>
-      <div className="thread" ref={threadRef}>
+      <div className="thread" ref={threadRef} onScroll={onThreadScroll}>
         {drafts.length === 0 && (
           <div className="empty" style={{ padding: "24px 0 0" }}>
             <p>
