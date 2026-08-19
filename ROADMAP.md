@@ -1,7 +1,7 @@
 # ROADMAP · 会议同传台
 
 立项日期：2026-08-17
-当前阶段：已部署到阿里云新加坡节点，HTTP 可访问，HTTPS 证书待签
+当前阶段：已上线 https://interpretdesk.com ，HTTPS、限流、会话隔离均已线上验证
 
 ## 当前阶段
 
@@ -223,12 +223,26 @@ interpretdesk.com）。当前只有明文 HTTP 可用，证书未签，因此还
 - 新增 `server/tests/prompt_mode_check.py`，两层八项全过。directive_check、ui_check、
   scroll_stick_check 三项回归全过。
 
-## 尚未完成（对外开放前必须补）
+## 2026-08-19 正式上线并回归（已实测）
 
-- HTTPS 证书：443 端口 TCP 可连但 TLS 握手即断（openssl 报 unexpected eof），
-  certbot 尚未执行，目前只有明文 HTTP。会话 cookie 与用户上传的底稿现在走明文传输，
-  这是把地址给别人之前的第一顺位。签完若要开 Cloudflare 橙云，SSL/TLS 必须设
-  Full (strict)。
+- HTTPS 已签发并生效：Let's Encrypt 证书 CN=interpretdesk.com，有效期 2026-08-19 至
+  2026-11-17，自动续期定时器 certbot.timer 已就位。HTTP 301 跳 HTTPS。
+- 六笔改动随本次上线：声源默认麦克风、底稿份数上限、会中指示修复、右栏贴底跟随、
+  底稿注入预算 50,000 字、系统提示词四改。另有一直未生效的 nginx 限流本次一并装上。
+- 上线时踩到两个坑，都已修并回写代码：
+  一是 `http2 on;` 指令要 nginx 1.25.1 以上，服务器是 1.24.0，配置直接语法不过（脚本
+  自动回滚，站点没受影响）。
+  二是改用 `listen 443 ssl http2;` 之后 WebSocket 经 nginx 握手从 101 变 404。根因是
+  HTTP/2 协议不允许 Upgrade 升级机制，nginx 只能当普通 GET 转发；强制 HTTP/1.1 则正常。
+  浏览器开 WebSocket 一律走 HTTP/1.1 未必踩到，但这条长连接是本程序命根子，且 h2 对
+  单包页面收益很小，最终决定关掉 http2。
+- 上线回归（全部从本机对线上域名实测）：HTTPS 首页 200、证书链校验通过；HTTP 301 跳转；
+  WebSocket 带 cookie 握手 101、不带 cookie 403（会话闸门生效）；两个独立 cookie 罐拿到
+  不同会话 id；上传 11 份底稿回 413 并给出「最多存 10 份」提示；并发 60 次请求出现
+  46 次 200、14 次 429（限流生效）；线上前端包 index-CnFMYOH8.js 与本机构建产物一致。
+- 未配模型的新访客上传底稿回 502 并提示「还没配文本模型」，属预期路径。
+
+## 尚未完成（对外开放前必须补）
 - ~~上传体积限制~~ 已完成：单次 20 MB、单会话累计 60 MB，超限回 413 且不动已存底稿
   （isolation_check 已加两条断言）。
   注：每个用户填自己的 API key，模型费用不落在运营者身上，限流主要防的是服务器磁盘与 CPU。
