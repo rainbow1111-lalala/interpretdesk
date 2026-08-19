@@ -175,7 +175,9 @@ async def get_context() -> dict:
 
 @app.post("/api/context")
 async def post_context(files: list[UploadFile] = File(default=[]),
-                       note: str = Form(default="")) -> dict:
+                       note: str = Form(default=""),
+                       replace: bool = Form(default=False)) -> dict:
+    """replace=True 换一场会（旧原文挪进回收站），False 给同一场会补材料。"""
     tmpdir = Path(tempfile.mkdtemp(prefix="mi-ctx-"))
     try:
         paths = []
@@ -185,7 +187,10 @@ async def post_context(files: list[UploadFile] = File(default=[]),
             dest = tmpdir / Path(f.filename).name
             dest.write_bytes(await f.read())
             paths.append(dest)
-        state.context = await context_store.build(paths, note)
+        state.context = await context_store.build(paths, note, replace)
+        # 预取片段是上一份底稿的原文切块，换底稿后必须扔掉，否则旧会议的内容会跟着
+        # 拟稿一起发出去
+        state.excerpts = []
     except Exception as exc:
         log.exception("底稿提炼失败")
         raise HTTPException(status_code=502,
@@ -214,6 +219,7 @@ async def clear_context() -> dict:
         shutil.copy2(context_store.BRIEF_PATH, bin_dir / "context.json")
     state.context = context_store.MeetingContext()
     context_store.save(state.context)
+    state.excerpts = []
     return await get_context()
 
 
@@ -221,6 +227,7 @@ async def clear_context() -> dict:
 async def delete_doc(name: str) -> dict:
     """删掉某一份原文。摘要不会自动重算，需要重新点读进来。"""
     retrieval.remove_doc(name)
+    state.excerpts = []
     return await get_context()
 
 

@@ -149,10 +149,6 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
     <div className="sheet-bg" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <h2>模型设置</h2>
-        <p className="hint">
-          API key 只写进本机 <code>data/settings.json</code>（权限 600，已在 .gitignore 里），
-          存好之后界面只显示是否已填，不回显内容。
-        </p>
 
         <div className="brief" style={{ borderTop: "none", paddingTop: 0 }}>
           <dl>
@@ -197,10 +193,6 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
                   patch((d) => ({ ...d, context_full_chars: Number(v.replace(/\D/g, "")) || 0 }))
                 }
               />
-              <p className="hint" style={{ margin: "8px 0 0" }}>
-                实测首字延迟：一千五百字 1.6 秒，一万九千字 1.8 到 3.3 秒，四万字 5.05 秒。
-                会议里首字超过三秒就难用，默认压在两万，更多的靠检索补。填 0 表示只用检索。
-              </p>
               <div className="row">
                 <button className="mini" onClick={() => runTest("text")}>
                   测试快档
@@ -256,7 +248,7 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
                 </p>
               )}
               <Field
-                label="base url（填百炼的 compatible-mode 地址即可，实时地址自动换算）"
+                label="base url"
                 value={data.speech.base_url}
                 placeholder="https://xxx.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
                 onChange={(v) => patch((d) => ({ ...d, speech: { ...d.speech, base_url: v } }))}

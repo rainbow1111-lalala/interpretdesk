@@ -27,7 +27,7 @@ SPEECH_ENGINES: dict[str, dict[str, Any]] = {
         "label": "通义千问 LiveTranslate（阿里云百炼实时 WebSocket）",
         "implemented": True,
         "single_stream": True,
-        "note": "音频进、双语文本出，官方口径延迟 2.8 秒。base url 填百炼给的 compatible-mode 地址即可，实时地址由程序换算。",
+        "note": "",
         "defaults": {
             "base_url": "https://<workspace>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
             "model": "qwen3.5-livetranslate-flash-realtime",

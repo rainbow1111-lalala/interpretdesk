@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -180,13 +181,21 @@ def _strip_fence(text: str) -> str:
     return text.strip()
 
 
-async def build(paths: list[Path], extra_note: str = "") -> MeetingContext:
+async def build(paths: list[Path], extra_note: str = "",
+                replace: bool = False) -> MeetingContext:
     """把新文件并进已存原文，再对全部原文重新提炼一次底稿。
 
-    上传是累加而不是替换：原文留在 data/docs/，每次上传只添新的，旧的还在。要去掉某一份走
-    删除接口。
+    两种模式，由调用方按用户在界面上选的来定：
+
+    - replace=False：累加。同一场会分批补材料时用，原文留在 data/docs/，旧的还在。
+    - replace=True：换一场会。先把已存原文与旧摘要挪进 data/trash/<时间戳>/ 再存新的。
+      底稿是一场会一份，上一场的材料留着会混进拟稿上下文，出现答非所问。
+
+    替换要等新文件确实抽出了内容再动手清旧的。先清后抽的话，遇上一份读不出来的 PDF 就会
+    落得两头空，会前几分钟碰上这个没法收场。
     """
     failed = []
+    ready: list[tuple[str, str, str]] = []
     for p in paths:
         try:
             # 抽文本是同步的，几十页 PDF 加 OCR 能卡住整个事件循环，扔线程里跑
@@ -200,10 +209,19 @@ async def build(paths: list[Path], extra_note: str = "") -> MeetingContext:
             failed.append(f"{p.name}（读取失败：{type(exc).__name__}）")
             continue
         if text:
-            retrieval.store_doc(p.stem, text)
-            log.info("入库 %s：%s，%d 字", p.name, method, len(text))
+            ready.append((p.stem, text, method))
         else:
             failed.append(f"{p.name}（没抽到文字）")
+
+    if replace and (ready or extra_note.strip()):
+        bin_dir = retrieval.clear_docs()
+        if bin_dir and BRIEF_PATH.exists():
+            shutil.copy2(BRIEF_PATH, bin_dir / "context.json")
+        log.info("换底稿：旧原文与摘要挪进 %s", bin_dir)
+
+    for stem, text, method in ready:
+        retrieval.store_doc(stem, text)
+        log.info("入库 %s：%s，%d 字", stem, method, len(text))
     if extra_note.strip():
         retrieval.store_doc("口述补充", extra_note.strip())
 

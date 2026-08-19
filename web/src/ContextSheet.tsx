@@ -16,15 +16,31 @@ export function ContextSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
+  // 底稿是一场会一份。默认换新，免得上一场的材料留在里面混进拟稿；同一场会分批补材料时
+  // 手动切到追加
+  const [replace, setReplace] = useState(true);
+  const existing = info?.docs.length ?? 0;
 
   const submit = async () => {
     if (busy || (files.length === 0 && !note.trim())) return;
+    if (replace && existing > 0) {
+      const names = (info?.docs ?? []).map((d) => d.name).join("、");
+      if (
+        !window.confirm(
+          `换成新底稿？现有 ${existing} 份原文（${names}）会挪进 data/trash 保留，可以取回。` +
+            `\n\n如果这是同一场会补材料，点取消，改选「补进现有底稿」。`,
+        )
+      ) {
+        return;
+      }
+    }
     setBusy(true);
     setError("");
     setDone("");
     const body = new FormData();
     files.forEach((f) => body.append("files", f));
     body.append("note", note);
+    body.append("replace", replace ? "true" : "false");
     try {
       const r = await fetch("/api/context", { method: "POST", body });
       if (!r.ok) {
@@ -35,7 +51,8 @@ export function ContextSheet({
       onUploaded(next);
       const bad = next.sources.filter((x) => x.includes("失败"));
       setDone(
-        `读好了：底稿共 ${next.docs.length} 份原文，术语锁定 ${next.glossarySize} 条，` +
+        `${replace && existing > 0 ? "换好了（旧底稿在 data/trash 可取回）：" : "读好了："}` +
+          `底稿共 ${next.docs.length} 份原文，术语锁定 ${next.glossarySize} 条，` +
           `原文索引 ${next.indexChunks} 块，会议中可按内容检索。`,
       );
       if (bad.length > 0) setError(`这些文件没读进来：${bad.join("；")}`);
@@ -96,6 +113,27 @@ export function ContextSheet({
           onChange={(e) => setNote(e.target.value)}
         />
 
+        {existing > 0 && (
+          <div className="row" style={{ marginTop: 10, gap: 16, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="radio"
+                checked={replace}
+                onChange={() => setReplace(true)}
+              />
+              换成新底稿（换一场会，旧的挪进回收站）
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="radio"
+                checked={!replace}
+                onChange={() => setReplace(false)}
+              />
+              补进现有底稿（同一场会加材料）
+            </label>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
           <button className="send" disabled={busy || (files.length === 0 && !note.trim())} onClick={submit}>
             {busy ? "正在读，长文件要等一会" : "读进来"}
@@ -121,7 +159,7 @@ export function ContextSheet({
         {info && info.docs.length > 0 && (
           <div className="brief">
             <dl>
-              <dt>已存原文（上传是累加，不会覆盖）</dt>
+              <dt>已存原文（默认换新，可在上方改成补进现有底稿）</dt>
               <dd>
                 {info.docs.map((d) => (
                   <div className="file-row" key={d.name}>
