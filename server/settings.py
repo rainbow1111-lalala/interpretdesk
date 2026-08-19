@@ -99,7 +99,7 @@ class Settings:
     # 实测首字延迟：1.5k 字 1.6 秒，19.3k 字 1.8 到 3.3 秒，40k 字 5.05 秒。会议里首字超过
     # 3 秒就难用。定两万五是为了让两万四千字的法规要点对照完整进上下文，不在半截被切断；
     # 原文全文是提示词的稳定前缀，同一场会里第二次拟稿起走服务端上下文缓存，边际代价小。
-    context_full_chars: int = 25_000
+    context_full_chars: int = 8_000
     # 语音层
     speech_engine: str = "qwen_livetranslate"
     speech: Engine = field(default_factory=Engine)
@@ -137,7 +137,7 @@ def load(ws: config.Workspace) -> Settings:
                        if k in {"base_url", "api_key", "model"}}),
         text_model_strong=raw.get("text_model_strong", "") or "",
         embed_model=raw.get("embed_model") or "text-embedding-v4",
-        context_full_chars=int(raw.get("context_full_chars") or 25_000),
+        context_full_chars=int(raw.get("context_full_chars") or 8_000),
         speech_engine=raw.get("speech_engine") or "qwen_livetranslate",
         speech=Engine(**{k: v for k, v in (raw.get("speech") or {}).items()
                          if k in {"base_url", "api_key", "model"}}),
