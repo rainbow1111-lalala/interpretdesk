@@ -1,0 +1,25 @@
+[Unit]
+Description=interpretdesk 会议同传台
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=interpretdesk
+WorkingDirectory=/opt/interpretdesk
+# 绝对不要设 MI_SINGLE_USER。设了就是所有访客共用一套底稿与同一个 API key
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/interpretdesk/.venv/bin/python -m uvicorn server.main:app \
+    --host 127.0.0.1 --port 8787 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=3
+# 用户上传的会议材料在这里，只给本服务读写
+StateDirectory=interpretdesk
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interpretdesk/data
+
+[Install]
+WantedBy=multi-user.target
