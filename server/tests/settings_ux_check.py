@@ -33,6 +33,13 @@ def main() -> int:
         page.wait_for_selector(".sheet h2")
 
         # 语音层的 base url 与 model 必须是真值，不是占位
+        # 状态条要说清各自干嘛用的，只写「还没配：文本模型、语音模型」用户看不懂
+        state = page.eval_on_selector(".cfg-state", "e => e.innerText").replace("\n", " ")
+        print("  状态条：", state)
+        told = ("已配好" in state) or ("草拟" in state and "字幕" in state and "百炼" in state)
+        print("  状态条写清了用途与推荐 →", told)
+        ok &= told
+
         vals = page.eval_on_selector_all(".sheet input", "els => els.map(e => e.value)")
         filled = any("livetranslate" in v or "generativelanguage" in v for v in vals)
         print("  语音层默认模型已填进框里 →", filled)
@@ -67,6 +74,27 @@ def main() -> int:
         ok &= bool(opened)
 
         page.screenshot(path=str(SHOTS / "设置-智谱.png"), full_page=True)
+
+        # 本机这份配置是齐的，红字那条路走不到，用桩把 health 改成未配再看一次
+        page2 = browser.new_page(viewport={"width": 1280, "height": 900})
+        page2.route("**/api/health", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok": false, "detail": "还没配：文本模型、语音模型"}'))
+        page2.goto(BASE)
+        if page2.query_selector(".onboard-ok"):
+            page2.click(".onboard-ok")
+            page2.wait_for_selector(".onboard", state="detached")
+        page2.click("text=模型设置")
+        page2.wait_for_selector(".cfg-state")
+        page2.wait_for_timeout(400)
+        red = page2.eval_on_selector(".cfg-state", "e => e.className + '｜' + e.innerText")
+        print("  未配时状态条：", red.replace("\n", " "))
+        red_ok = ("bad" in red and "草拟会议回复" in red
+                  and "字幕生成" in red and "阿里云百炼" in red)
+        print("  未配时文案含用途与推荐 →", red_ok)
+        ok &= red_ok
+        page2.screenshot(path=str(SHOTS / "设置-未配.png"), full_page=True)
+        page2.close()
         browser.close()
     print(f"截图在 {SHOTS}")
     print("结果：" + ("通过" if ok else "不通过"))

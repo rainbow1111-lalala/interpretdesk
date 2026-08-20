@@ -17,6 +17,16 @@ function usable(v?: string): string {
   return v && !v.includes("<") ? v : "";
 }
 
+/** 缺什么就说什么，并且说清各自是干嘛用的。只写「还没配：文本模型、语音模型」
+ *  用户不知道这两样分别对应界面上的哪件事。 */
+function missingText(detail: string): string {
+  const need: string[] = [];
+  if (detail.includes("文本模型")) need.push("文本模型（用于 AI 草拟会议回复内容）");
+  if (detail.includes("语音")) need.push("语音模型（用于会议同声传译的字幕生成）");
+  if (!need.length) return detail;
+  return `请填入${need.join("与")}，推荐阿里云百炼。`;
+}
+
 function providerOf(baseUrl: string) {
   const u = (baseUrl || "").toLowerCase();
   if (u.includes("aliyuncs.com")) return PROVIDERS[0];
@@ -194,9 +204,7 @@ export function SettingsSheet({ onClose, onSaved }: { onClose: () => void; onSav
 
         {health && (
           <p className={health.ok ? "cfg-state ok" : "cfg-state bad"}>
-            {health.ok
-              ? "文本模型与实时字幕都已配好，可以开会了。"
-              : `${health.detail}。缺文本模型则拟稿不出，缺语音则点开始记录不会有字幕。`}
+            {health.ok ? "文本模型与实时字幕都已配好，可以开会了。" : missingText(health.detail)}
           </p>
         )}
 
