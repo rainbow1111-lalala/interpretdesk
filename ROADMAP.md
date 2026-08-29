@@ -297,6 +297,21 @@
   出现另配语音的红字提示、服务商预设自动填好 base url、向量模型默认收在高级里、点开可见。
   截图留档。
 
+## 2026-08-29 源码双远端托管（已实测）
+
+- 目标：源码留档且不开源，境外境内各存一份，任何一边出事都能恢复。
+- `origin` = GitHub `rainbow1111-lalala/interpretdesk`，Private；`backup` = 自建 Gitea
+  `https://lawskillhub.com/git/dehenglaw/interpretdesk.git`，Private。默认上游是 origin。
+- 推送前体检：42 个提交全历史扫描 API key、密码、阿里云 AccessKey，零命中；客户标识扫描
+  仅命中 `server/tests/extract_check.py` 的 GBK 编码测试样例条文，非真实客户材料。
+  `.gitignore` 早已排除 `data/`，settings.json、meetings.db、底稿、向量索引均未进过仓库。
+- 推送前处理：ROADMAP 中生产服务器公网 IP 改为 `<生产服务器IP>` 占位符（commit 879d480）。
+- Gitea 侧 `DISABLE_SSH = true`，故走 HTTPS。访问令牌在服务器上生成，经管道直接存入 macOS
+  钥匙串，全程未落盘未显示，服务器临时文件已 shred 删除。
+- 实测：两端 main 与本地同为 879d480；未登录访问两端网页均 404，Gitea 匿名克隆
+  `info/refs` 返回 401，对照公开仓库 skill-hub 返回 200。
+- 服务器负担：裸仓库 468K，磁盘仍为 40G 用 11G 剩 27G，负载 0.11。
+
 ## 尚未完成（对外开放前必须补）
 - ~~上传体积限制~~ 已完成：单次 20 MB、单会话累计 60 MB，超限回 413 且不动已存底稿
   （isolation_check 已加两条断言）。
