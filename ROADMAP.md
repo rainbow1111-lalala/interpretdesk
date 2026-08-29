@@ -130,7 +130,7 @@
 
 ## 部署上线（2026-08-19，已实测）
 
-- 服务器：阿里云新加坡节点，Ubuntu，公网 IP 8.219.58.19（whois 归属 Alibaba Cloud
+- 服务器：阿里云新加坡节点，Ubuntu，公网 IP <生产服务器IP>（whois 归属 Alibaba Cloud
   (Singapore) Private Limited）。选境外节点故不涉及 ICP 备案。原判断「Cloudflare 放不了
   Python 长连接应用」成立，Cloudflare 现只做 DNS 解析，应用跑在自有主机上。
 - 部署方式：`deploy/pack.sh` 打包（不含 data/）→ 解到 /opt/interpretdesk →
@@ -138,10 +138,10 @@
   active 且 enabled，uvicorn 监听 127.0.0.1:8787，nginx 反代 80 端口。
 - 实测证据：服务器本机 `curl 127.0.0.1:8787/api/health` 返回 200；带
   `Host: interpretdesk.com` 走 nginx 同样 200。本机远端复验
-  `curl -H 'Host: interpretdesk.com' http://8.219.58.19/` 返回 200，响应头
+  `curl -H 'Host: interpretdesk.com' http://<生产服务器IP>/` 返回 200，响应头
   `Server: nginx/1.24.0 (Ubuntu)`，并带 `set-cookie: mi_sid=...; HttpOnly; SameSite=lax`，
   即多人会话中间件确已生效。安装脚本自测那次 404 事后不复现，带与不带 Host 现均为 200。
-- 域名解析：interpretdesk.com 与 www 两条 A 记录均指向 8.219.58.19，Cloudflare 托管
+- 域名解析：interpretdesk.com 与 www 两条 A 记录均指向 <生产服务器IP>，Cloudflare 托管
   （NS 为 christina/donovan.ns.cloudflare.com），当前灰云 DNS only，回源 IP 直接暴露。
 
 ## 2026-08-19 声源默认改为麦克风（已实测）
