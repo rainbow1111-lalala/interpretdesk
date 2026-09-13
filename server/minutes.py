@@ -22,7 +22,8 @@ log = logging.getLogger(__name__)
 
 # 纪要按会话存，见 config.Workspace.minutes
 
-PROMPT = """你在为一名中国律师整理一场中英文会议的纪要。下面是这场会议的逐句笔录，以及会前底稿。
+PROMPT = """你在为会议参与者整理一场多语种会议的中文纪要。下面是本场逐句笔录及会前底稿。
+用户身份以底稿为准，不预设职业或行业。未标明说话人时不要擅自给某一方归属发言。
 
 请输出 markdown 格式的会议纪要，结构如下：
 
@@ -99,7 +100,7 @@ async def generate(ws: config.Workspace, meeting_id: int, ctx: MeetingContext) -
         raise RuntimeError("还没配文本模型，先在模型设置里填 base URL 与 model name")
 
     prompt = (PROMPT
-              .replace("{when}", meeting_window(meeting_id))
+              .replace("{when}", meeting_window(ws, meeting_id))
               .replace("{brief}", ctx.briefing_text() or "（无）")
               .replace("{transcript}", _transcript_text(turns)))
     log.info("生成纪要：会议 #%d，%d 段笔录，模型 %s",

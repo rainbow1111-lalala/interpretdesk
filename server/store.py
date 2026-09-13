@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 import time
 from datetime import datetime
 
@@ -62,9 +63,28 @@ def list_meetings(ws: config.Workspace, limit: int = 50) -> list[dict]:
 def get_turns(ws: config.Workspace, meeting_id: int) -> list[dict]:
     with _conn(ws) as conn:
         rows = conn.execute(
-            "SELECT src, dst, src_lang, ts FROM turns WHERE meeting_id = ? ORDER BY id",
+            "SELECT src, dst, src_lang, ts, turn_id FROM turns WHERE meeting_id = ? ORDER BY id",
             (meeting_id,)).fetchall()
-    return [{"src": r[0], "dst": r[1], "srcLang": r[2], "ts": r[3]} for r in rows]
+    return [{"src": r[0], "dst": r[1], "srcLang": r[2], "ts": r[3], "turnId": r[4]}
+            for r in rows]
+
+
+def meeting_exists(ws: config.Workspace, meeting_id: int) -> bool:
+    with _conn(ws) as conn:
+        return conn.execute("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)).fetchone() is not None
+
+
+def load_conversation(ws: config.Workspace) -> dict:
+    if not ws.conversation.exists():
+        return {"drafts": [], "directives": [], "profile": {}}
+    return json.loads(ws.conversation.read_text(encoding="utf-8"))
+
+
+def save_conversation(ws: config.Workspace, conversation: dict) -> None:
+    ws.root.mkdir(parents=True, exist_ok=True)
+    temp = ws.conversation.with_suffix(".tmp")
+    temp.write_text(json.dumps(conversation, ensure_ascii=False), encoding="utf-8")
+    temp.replace(ws.conversation)
 
 
 def export_markdown(ws: config.Workspace, meeting_id: int) -> str:

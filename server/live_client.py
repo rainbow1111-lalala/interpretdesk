@@ -168,5 +168,5 @@ class LiveTranslateClient:
                     await self.emit({"type": "audio", "b64": data})
             if sc.get("turnComplete"):
                 await self.emit({"type": "turn_complete"})
-            if self._stop.is_set():
+            if self._stop.is_set() and sc.get("turnComplete"):
                 return

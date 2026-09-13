@@ -60,6 +60,15 @@ class Workspace:
     """
 
     root: Path
+    shared_root: Path | None = None
+
+    def for_meeting(self, meeting_id: int) -> "Workspace":
+        shared = self.shared_root or self.root
+        return Workspace(shared / "meeting-data" / str(meeting_id), shared)
+
+    @property
+    def conversation(self) -> Path:
+        return self.root / "conversation.json"
 
     @classmethod
     def for_session(cls, sid: str) -> "Workspace":
@@ -85,15 +94,15 @@ class Workspace:
 
     @property
     def settings(self) -> Path:
-        return self.root / "settings.json"
+        return (self.shared_root or self.root) / "settings.json"
 
     @property
     def db(self) -> Path:
-        return self.root / "meetings.db"
+        return (self.shared_root or self.root) / "meetings.db"
 
     @property
     def minutes(self) -> Path:
-        return self.root / "minutes"
+        return (self.shared_root or self.root) / "minutes"
 
 
 def api_key() -> str:

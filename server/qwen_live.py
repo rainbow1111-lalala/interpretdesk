@@ -237,5 +237,4 @@ class QwenLiveClient:
                                       or usage.get("prompt_tokens") or 0)
                 self.response_tokens += (usage.get("output_tokens")
                                          or usage.get("completion_tokens") or 0)
-            if self._stop.is_set():
-                return
+            # stop 只停止送音频，继续接收尾句，直到 session.finished 或上层超时。
