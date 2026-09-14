@@ -438,6 +438,51 @@
 结果，不能写成真实会议验证通过。
 
 
+## 上线暂停中：代码已就位，卡在服务器登录（2026-09-14）
+
+本轮九条改进已合入 main（`cf319e8`），GitHub 与 lawskillhub 两端同步，**尚未部署**。
+生产站仍在跑上一版，功能正常，不影响使用。暂停原因是拿不到服务器的登录凭证。
+
+### 恢复上线要做的事，按顺序
+
+1. **拿回服务器登录**（见下面「服务器在哪」一节）。
+2. **备份并验证**：服务器上 `tar -czf /root/backups/interpretdesk-data-$(date +%Y%m%d-%H%M).tar.gz
+   -C /opt/interpretdesk data`，然后 `tar -tzf 那个包 | wc -l` 必须有输出，列不出内容的备份不算备份。
+3. **传包解包**：本机 `bash deploy/pack.sh` 重新打（包在 `/tmp/interpretdesk-deploy.tar.gz`），
+   scp 上去，核对 sha256 后 `tar -xzf ... -C /opt/interpretdesk`，`chown -R interpretdesk:interpretdesk`，
+   `systemctl restart interpretdesk`。`data/` 不在包里，解包不动用户材料。
+4. **线上回归**：首页引用的构建产物名要从 `index-kaJBjQMt.js` 变成新包里那个（`web/dist/assets/`
+   下的实际文件名），这是判断新版是否真的上线的最直接标志。再在浏览器里过四件事：会前检查三行
+   是否出现、新建会议能否沿用旧材料、停止后是否先「正在收尾」再弹纪要且尾句在、拟稿能否出卡片。
+
+### 服务器在哪（2026-09-14 查清，此前记载不全，走了弯路）
+
+- **国际站账号**，不是中国站。`aliyun.com` 与 `alibabacloud.com` 是两套独立账号体系，
+  中国站账号下 ECS 与轻量应用服务器全地域都是 0 台，机器在国际站。
+- **产品是轻量应用服务器（Simple Application Server），不是 ECS。** 所以它不出现在 ECS 实例
+  列表里，也**没有云助手、没有安全组**；防火墙是轻量自己那套（当前 4 条规则）。
+  控制台：`swas.console.alibabacloud.com/servers/ap-southeast-1`，地域 Singapore，共 1 台。
+- 进不去 SSH 时的备用通道：实例页的「远程连接」是网页版 root 终端，不经过 22 端口，
+  不受 fail2ban 影响，也不用密码。
+
+### 登录凭证的现状
+
+- **本机没有这台机器的私钥。** 全家目录扫过，只有 `id_ed25519`（本机自有）、`dehenglaw.pem`、
+  `lawskillhub.pem.repo-copy` 三把，都不是它的；2026-08-19 前后没有新增任何密钥文件。
+- `~/.ssh/known_hosts` 里该 IP 的三条记录写于 2026-08-18 23:36，即部署前夜，说明**当初是用
+  密码登的**，密码没有存在任何文件里。
+- 2026-09-14 排查时连续试了六次密钥认证，触发了服务器上的防护，该出口 IP 的 22 端口被临时封禁
+  （表现为 `Connection closed by ... port 22`，且连协议握手都不再回）。封禁通常十分钟到一小时
+  自动解除。**教训：没有现成凭证的服务器不要试密钥，试错有代价，代价是把自己的运维通道堵上。**
+
+### 根治办法（下次不要再卡在这里）
+
+从控制台的网页终端进去，把本机 `~/.ssh/id_ed25519.pub` 追加进服务器的
+`/root/.ssh/authorized_keys`（`chmod 700 /root/.ssh`、`chmod 600 authorized_keys`），
+以后一律密钥登录。同时跑 `fail2ban-client status sshd` 看有没有把自己封进去，有就
+`fail2ban-client set sshd unbanip <出口IP>`。
+
+
 ## 待办
 
 1. 真实会议验证网页版 Zoom 或 Teams 的标签页音频链路（需本人操作共享面板）。
