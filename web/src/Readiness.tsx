@@ -115,7 +115,9 @@ export function Readiness({ source, micId, micLabel, ctxInfo, profile, hasMeetin
         <span className="ready-label">底稿准备</span>
         <span className="ready-body">
           {!hasMeeting ? (
-            <b className="bad">还没有会议。先在「会议」里建一场，材料才有地方存。</b>
+            <b className="bad">
+              还没有会议。点右上角「会议」建一场，可以沿用你已经准备好的材料。
+            </b>
           ) : docs.length === 0 && filled === 0 ? (
             <b className="bad">这一场还没有任何材料，也没填会前交代。</b>
           ) : (

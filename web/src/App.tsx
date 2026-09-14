@@ -263,7 +263,7 @@ export default function App() {
   const startBlockReason = otherTabRecording
     ? "另一个标签页正在录这场会。"
     : meetingId === null
-      ? "还没有会议。点右上角「会议」建一场。"
+      ? "还没有会议。点右上角「会议」建一场，可以沿用你已经准备好的材料。"
       : "";
   const canStart = !startBlockReason;
 
