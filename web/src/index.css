@@ -1020,3 +1020,167 @@ a.mini {
 .advanced[open] > summary::before {
   content: "－ ";
 }
+
+/* ── 会前检查 ───────────────────────────────────────────── */
+.ready {
+  margin: 0 24px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-2, #fbfaf7);
+}
+.ready h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3, #6b6b6b);
+}
+.ready-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.ready-label {
+  flex: 0 0 68px;
+  color: var(--ink-3, #6b6b6b);
+}
+.ready-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ready-body .good { color: #2f7a4f; }
+.ready-body .bad { color: #a33; }
+.ready-row .chip { flex: 0 0 auto; }
+
+/* ── 会议列表 ───────────────────────────────────────────── */
+.mtg-new,
+.mtg-list { margin-top: 18px; }
+.mtg-new h3,
+.mtg-list h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.mtg-new input[type="text"],
+.mtg-new input:not([type]) {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+}
+.mtg-adopt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.mtg-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.mtg-row.cur { background: var(--paper-2, #fbfaf7); }
+.mtg-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mtg-meta b {
+  display: block;
+  font-size: 14px;
+}
+.mtg-meta span {
+  font-size: 12px;
+  color: var(--ink-3, #6b6b6b);
+}
+.mtg-cur {
+  font-size: 12px;
+  color: var(--ink-3, #6b6b6b);
+}
+.mtg-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-3, #6b6b6b);
+}
+.sheet-err {
+  margin-top: 12px;
+  color: #a33;
+  font-size: 13px;
+}
+
+/* ── 会前交代与材料说明 ─────────────────────────────────── */
+.profile { margin-bottom: 20px; }
+.profile h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.profile-row {
+  display: block;
+  margin: 10px 0;
+}
+.profile-row span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--ink-3, #6b6b6b);
+}
+.profile-row textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+.storage {
+  margin-top: 18px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--ink-3, #6b6b6b);
+}
+.storage > summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.storage p { margin: 8px 0 0; }
+
+/* ── 拟稿的依据与待确认 ─────────────────────────────────── */
+.evidence {
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+.evidence > summary {
+  cursor: pointer;
+  color: var(--ink-3, #6b6b6b);
+}
+.evidence p { margin: 6px 0 0; }
+.ev-ok b { color: var(--ink-2, #333); }
+.ev-bad { color: #a33; }
+.ev-todo { color: var(--ink-3, #6b6b6b); }
+.ev-note { color: var(--ink-3, #6b6b6b); }
+
+.speaker-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--ink-3, #6b6b6b);
+}
+.rec-block {
+  flex: 0 0 auto;
+  margin-left: 10px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: #a33;
+}

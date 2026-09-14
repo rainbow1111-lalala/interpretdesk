@@ -21,7 +21,7 @@ before_live = sorted(p.name for p in (LIVE / "docs").glob("*.txt"))
 tmp = Path(tempfile.mkdtemp(prefix="mi-clear-"))
 config.SESSIONS_DIR = tmp / "sessions"
 SID = "clearcheck_session_0001"
-WS = config.Workspace.for_session(SID)
+SWS = config.Workspace.for_session(SID)
 
 
 async def main() -> int:
@@ -31,8 +31,13 @@ async def main() -> int:
     async def emit(p):
         emitted.append(p)
 
-    # 摆出一场会开到一半的样子：底稿在、索引在、片段预取好了、字幕流水线拿着术语表
+    # 摆出一场会开到一半的样子：底稿在、索引在、片段预取好了、字幕流水线拿着术语表。
+    # 材料改为按会议分开存之后，先得有一场会议，底稿才有地方落。
     s = srv._session(SID)
+    from server import store
+    mid = store.start_meeting(SWS, "虚构的上一场会")
+    s.bind_meeting(mid)
+    WS = s.materials()
     s.context = context_store.MeetingContext(
         matter="上一场会",
         terms=[{"en": "escrow", "zh": "托管账户", "variants": ["代管账户"]}],

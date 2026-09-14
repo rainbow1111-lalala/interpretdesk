@@ -124,6 +124,8 @@ class QwenLiveClient:
         self.target_lang = (target_lang or "zh").split("-")[0]
         self.audio_q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=200)
         self._stop = asyncio.Event()
+        # 服务端确认这一路已经收完。停止记录后要等它，等到就立刻收摊，不再固定睡几秒。
+        self.finished = asyncio.Event()
         self.audio_tokens = 0
         self.response_tokens = 0
         self._unknown: set[str] = set()
@@ -172,6 +174,8 @@ class QwenLiveClient:
                                  "detail": f"{type(exc).__name__}: {exc}"[:200],
                                  "attempt": attempt})
                 await asyncio.sleep(min(0.5 * 2 ** (attempt - 1), 8.0))
+        # 循环退出即这一路不会再有内容，兜底置位，免得上层白等满超时
+        self.finished.set()
         await self.emit({"type": "status", "state": "closed"})
 
     async def _one_connection(self) -> None:
@@ -190,6 +194,10 @@ class QwenLiveClient:
             finally:
                 sender.cancel()
                 await asyncio.gather(sender, return_exceptions=True)
+                # 停止之后连接断开，等同于这一路已经收完。服务端不一定回
+                # session.finished（实测百炼就不回），只认那一个事件会白等满超时。
+                if self._stop.is_set():
+                    self.finished.set()
 
     async def _send_loop(self, ws) -> None:
         while True:
@@ -197,6 +205,7 @@ class QwenLiveClient:
             if pcm is None:
                 await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
                 await ws.send(json.dumps({"type": "session.finish"}))
+                log.info("已发 session.finish，等服务端确认收尾")
                 return
             await ws.send(json.dumps({
                 "type": "input_audio_buffer.append",
@@ -226,6 +235,7 @@ class QwenLiveClient:
                 # 一轮应答结束，作为段落边界
                 await self.emit({"type": "turn_complete"})
             elif kind == "session.finished":
+                self.finished.set()
                 return
             elif kind not in IGNORE_EVENTS and kind not in self._unknown:
                 self._unknown.add(kind)
@@ -237,5 +247,4 @@ class QwenLiveClient:
                                       or usage.get("prompt_tokens") or 0)
                 self.response_tokens += (usage.get("output_tokens")
                                          or usage.get("completion_tokens") or 0)
-            if self._stop.is_set():
-                return
+            # stop 只停止送音频，继续接收尾句，直到 session.finished 或上层超时。

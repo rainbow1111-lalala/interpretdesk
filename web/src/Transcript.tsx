@@ -39,6 +39,10 @@ export function Transcript({
 
   return (
     <div className="record" ref={boxRef}>
+      {!nothing && (
+        // 界面本身也不能暗示归属：这套字幕没有说话人识别，谁说的要由用户自己判断
+        <p className="speaker-note">字幕不区分说话人，以下发言未标注归属。</p>
+      )}
       {nothing && (
         <div className="empty">
           <p>

@@ -6,14 +6,15 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 BASE = f"http://127.0.0.1:{os.environ.get('MI_PORT', '8787')}"
-SHOTS = Path("/private/tmp/claude-501/-Users-rainbow/"
-             "16b1d450-b283-4899-8b89-4794d5225e7a/scratchpad/shots-mobile")
+SHOTS = Path(os.environ.get("MI_SHOTS")
+             or (Path(tempfile.gettempdir()) / "mi-shots-mobile"))
 
 # 手机上没有屏幕共享；麦克风给一条真轨，免得点开始就报错
 NO_TAB = """

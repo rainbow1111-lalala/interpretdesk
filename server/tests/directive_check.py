@@ -52,7 +52,7 @@ def flooded_history() -> list[dict]:
 def check_prompt() -> bool:
     ok = True
     hist = flooded_history()
-    p = drafting.build_prompt(CTX, TRANSCRIPT, hist, QUESTION, directives=[DIRECTIVE])
+    p, _ = drafting.build_prompt(CTX, TRANSCRIPT, hist, QUESTION, directives=[DIRECTIVE])
     checks = {
         "指示单列成节": "【会中指示" in p,
         "指示原文在提示词里": DIRECTIVE in p,
@@ -60,7 +60,7 @@ def check_prompt() -> bool:
         "系统提示写明冲突时以会中指示为准": "以会中指示为准" in drafting.system_prompt("English"),
     }
     # 不传 directives 时（旧行为）指示确实会被历史窗口挤掉，这条证明成因判断没错
-    old = drafting.build_prompt(CTX, TRANSCRIPT, hist, QUESTION)
+    old, _ = drafting.build_prompt(CTX, TRANSCRIPT, hist, QUESTION)
     checks["不传指示时确会被挤掉（成因复现）"] = DIRECTIVE not in old
     for name, passed in checks.items():
         print(("  ok   " if passed else "  FAIL ") + name)

@@ -41,6 +41,15 @@ MAX_SESSION_BYTES = 60 * 1024 * 1024
 # 体积限额挡不住一堆小文件：几百份几十 KB 的文本同样能把向量索引撑爆、把提炼拖垮。
 # 一场会的会前材料十份足够宽松，真实用过的两份合计七万多字。
 MAX_SESSION_DOCS = 10
+# 材料改为按会议分开存之后，上面两个限额变成每场会议一份，会话总量就没有了上限。
+# 一个人开几十场会、每场十份材料，照样能把磁盘塞满，所以再加一道会话级的总量闸门。
+MAX_SESSION_TOTAL_BYTES = MAX_SESSION_BYTES * 3
+
+# 停止记录之后等模型把最后一句吐完的上限。实测百炼原话比译文晚 6.6 秒到，
+# 原来固定等 3.5 秒会切掉尾句；改成等结束信号，等到就立刻走，等不到最多等这么久。
+SETTLE_MAX_S = 8.0
+# 收到结束信号后仍可能有零星片段在路上，断句器安静这么久才算真的收完。
+SETTLE_QUIET_S = 1.2
 
 
 def single_user() -> bool:
@@ -60,6 +69,15 @@ class Workspace:
     """
 
     root: Path
+    shared_root: Path | None = None
+
+    def for_meeting(self, meeting_id: int) -> "Workspace":
+        shared = self.shared_root or self.root
+        return Workspace(shared / "meeting-data" / str(meeting_id), shared)
+
+    @property
+    def conversation(self) -> Path:
+        return self.root / "conversation.json"
 
     @classmethod
     def for_session(cls, sid: str) -> "Workspace":
@@ -85,15 +103,25 @@ class Workspace:
 
     @property
     def settings(self) -> Path:
-        return self.root / "settings.json"
+        return (self.shared_root or self.root) / "settings.json"
 
     @property
     def db(self) -> Path:
-        return self.root / "meetings.db"
+        return (self.shared_root or self.root) / "meetings.db"
 
     @property
     def minutes(self) -> Path:
-        return self.root / "minutes"
+        return (self.shared_root or self.root) / "minutes"
+
+    @property
+    def active(self) -> Path:
+        """当前这场会议的编号记在哪。挂共享根，会议工作区也读得到同一个文件。"""
+        return (self.shared_root or self.root) / "active-meeting.json"
+
+    @property
+    def meeting_data(self) -> Path:
+        """所有分场材料的父目录。它存不存在同时也是「这个会话走没走过分场流程」的判据。"""
+        return (self.shared_root or self.root) / "meeting-data"
 
 
 def api_key() -> str:

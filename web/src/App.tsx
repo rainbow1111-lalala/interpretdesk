@@ -5,8 +5,14 @@ import { Drafting } from "./Drafting";
 import { MinutesSheet } from "./MinutesSheet";
 import { Onboarding } from "./Onboarding";
 import { SettingsSheet } from "./SettingsSheet";
+import { MeetingSheet } from "./MeetingSheet";
+import { Readiness } from "./Readiness";
 import { Transcript } from "./Transcript";
-import type { ContextInfo, Draft, Entry, LinkState, LiveEntry } from "./types";
+import { useSoleRecorder } from "./useSoleRecorder";
+import type {
+  ContextInfo, Directive, Draft, Entry, Evidence, LinkState, LiveEntry, MeetingSummary,
+  Profile,
+} from "./types";
 
 // 顺序即下拉框里的顺序。日常用麦克风外放收音，省掉浏览器的共享面板那一步；
 // 戴耳机开线上会时对方的声音进不了麦克风，那种场合才需要抓会议标签页。
@@ -22,6 +28,7 @@ const STATE_LABEL: Record<LinkState, string> = {
   live: "正在同传",
   paused: "已暂停",
   reconnecting: "重连中",
+  settling: "正在收尾",
   error: "已中断",
 };
 
@@ -71,7 +78,13 @@ export default function App() {
   // 段落收口后右栏自动写建议回复；可关。ws 回调里读不到最新 state，用 ref 镜像
   const [autoReply, setAutoReply] = useState(true);
   const [meetingId, setMeetingId] = useState<number | null>(null);
+  const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
+  const [meetingOpen, setMeetingOpen] = useState(false);
+  const [canAdopt, setCanAdopt] = useState(false);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [directives, setDirectives] = useState<Directive[]>([]);
   const [minutesOpen, setMinutesOpen] = useState(false);
+  const { blocked: otherTabRecording, claim, release: releaseRecording } = useSoleRecorder();
   // 暂停时不再往上送音频。用 ref 是因为音频回调建立在 start 里，拿不到最新的 state
   const pausedRef = useRef(false);
   // 当前这张自动卡在回应哪一句，供卡片显示
@@ -89,6 +102,11 @@ export default function App() {
   const wsRef = useRef<WebSocket | null>(null);
   const capRef = useRef<AudioCapture | null>(null);
   const draftId = useRef(1);
+  // 停止之后等服务端确认收尾的兜底定时器
+  const settleTimer = useRef<number | undefined>(undefined);
+  // 正在跑的那条拟稿流。新的要求一来就把旧的掐掉，旧流的字一个都不许写进新稿
+  const abortRef = useRef<AbortController | null>(null);
+  const seqRef = useRef(0);
   // setLink 是异步生效的，连点两下「开始记录」会在按钮还没变灰前跑两遍 start，
   // 弹出两个共享面板。用 ref 同步挡住重入
   const startGate = useRef(false);
@@ -132,9 +150,31 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/context")
+    // 把上一场会接回来：材料、会前交代、已有的笔录一起恢复
+    fetch("/api/meetings/active")
       .then((r) => r.json())
-      .then(setCtxInfo)
+      .then((d) => {
+        setMeetingId(d.meetingId ?? null);
+        setCanAdopt(Boolean(d.canAdopt));
+        setCtxInfo(d.context ?? null);
+        setProfile(d.conversation?.profile ?? null);
+        setDirectives(d.conversation?.directives ?? []);
+        if (Array.isArray(d.turns)) {
+          setEntries(
+            d.turns.map((x: { turnId: number; src: string; dst: string; srcLang: string; ts: number }) => ({
+              turnId: x.turnId,
+              pairs: [{ src: x.src, dst: x.dst }],
+              srcLang: x.srcLang,
+              echo: !x.dst,
+              ts: x.ts,
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+    fetch("/api/meetings")
+      .then((r) => r.json())
+      .then(setMeetings)
       .catch(() => {});
     refreshHealth();
     fetch("/api/langs")
@@ -161,26 +201,52 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [link]);
 
+  // 收摊。只在异常路径上直接用，正常停止走 beginStop → ended → finishStop
   const teardown = useCallback(() => {
     capRef.current?.stop();
     capRef.current = null;
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "stop" }));
-      ws.close();
-    }
+    if (ws && ws.readyState === WebSocket.OPEN) ws.close();
     wsRef.current = null;
+    window.clearTimeout(settleTimer.current);
+    releaseRecording();
     setLive(null);
     setPeak(0);
-  }, []);
+  }, [releaseRecording]);
 
+  // 服务端确认收尾完成（或兜底超时）之后才收场。settled=false 表示没等到确认，
+  // 这时纪要可能少最后一句，得说出来而不是闷着。
+  const finishStop = useCallback(
+    (settled: boolean, turns?: number) => {
+      teardown();
+      setLink("idle");
+      pausedRef.current = false;
+      if (!settled) {
+        setNotice("服务端没有确认收尾，最后一句可能没收全，纪要仍可生成。");
+      }
+      // 停下来就问一句要不要出纪要，会议刚结束是整理的最佳时机
+      if ((turns ?? entryCount.current) > 0) setMinutesOpen(true);
+    },
+    [teardown],
+  );
+
+  // 点停止：先断音频、告诉服务端停，但连接留着等它把尾句收完。
+  // 实测语音服务的原话比译文晚六秒多到，这里一关连接就等于把最后一句扔了。
   const stop = useCallback(() => {
-    teardown();
-    setLink("idle");
-    pausedRef.current = false;
-    // 停下来就问一句要不要出纪要，会议刚结束是整理的最佳时机
-    if (entryCount.current > 0) setMinutesOpen(true);
-  }, [teardown]);
+    capRef.current?.stop();
+    capRef.current = null;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      finishStop(true);
+      return;
+    }
+    ws.send(JSON.stringify({ type: "stop" }));
+    setLink("settling");
+    setPeak(0);
+    // 服务端上限八秒，这里给到二十秒，网络再差也够；它没回就自己收场
+    window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => finishStop(false), 20000);
+  }, [finishStop]);
 
   const togglePause = useCallback(() => {
     const next = !pausedRef.current;
@@ -193,14 +259,22 @@ export default function App() {
     }
   }, []);
 
+  // 开不了的两个原因都要写清楚，不能只把按钮置灰让人猜
+  const startBlockReason = otherTabRecording
+    ? "另一个标签页正在录这场会。"
+    : meetingId === null
+      ? "还没有会议。点右上角「会议」建一场。"
+      : "";
+  const canStart = !startBlockReason;
+
   const start = useCallback(async () => {
-    if (startGate.current) return;
+    if (startGate.current || !canStart) return;
     startGate.current = true;
+    claim();
     setNotice("");
     setLink("starting");
     setElapsed(0);
     pausedRef.current = false;
-    setEntries([]);
     try {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
@@ -255,9 +329,19 @@ export default function App() {
           case "status":
             if (msg.state === "live") setLink(pausedRef.current ? "paused" : "live");
             else if (msg.state === "reconnecting") setLink("reconnecting");
+            else if (msg.state === "settling") setLink("settling");
             break;
           case "meeting":
             setMeetingId(msg.meetingId ?? null);
+            break;
+          case "ended":
+            // 服务端已经把尾句落库了，到这里才算真的结束
+            finishStop(Boolean(msg.settled), msg.turns);
+            break;
+          case "error":
+            setNotice(msg.detail || "服务端拒绝了这次录音。");
+            teardown();
+            setLink("idle");
             break;
           default:
             break;
@@ -305,12 +389,19 @@ export default function App() {
     } finally {
       startGate.current = false;
     }
-  }, [source, micId, mics.length, stop, teardown]);
+  }, [source, micId, mics.length, stop, teardown, canStart, claim]);
 
   const runDraft = useCallback(
     async (instruction: string, quality: "fast" | "good", replaceId?: number, auto = false,
      mode?: "draft" | "ask") => {
       const id = replaceId ?? draftId.current++;
+      // 手打的新要求必须能打断正在跑的自动稿。掐掉旧流并占一个新序号，
+      // 旧流剩下的字据此被丢弃，不会盖住新稿。
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const seq = ++seqRef.current;
+      const mine = () => seqRef.current === seq;
       setDrafting(true);
       setDrafts((prev) => {
         const next: Draft = {
@@ -333,17 +424,16 @@ export default function App() {
         { role: "user", text: d.instruction },
         { role: "model", text: d.en },
       ]);
-      // 我手打的要求单独送一份。自动建议那条固定指令不算指示，混进去只会稀释真正的改口
-      const directives = drafts
-        .filter((d) => !d.auto && d.instruction.trim())
-        .map((d) => d.instruction.trim())
-        .slice(-8);
+      // 会中指示不再从卡片里反推。猜出来的指示常常是错的：随口问一句也会被当成改口，
+      // 真正的改口反而可能被截断窗口挤掉。现在只认用户点过「存为会中指示」的那些，
+      // 服务端从这一场的 conversation.json 里读。
 
       try {
         const r = await fetch("/api/draft", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ instruction, history, quality, directives,
+          signal: controller.signal,
+          body: JSON.stringify({ instruction, history, quality,
                                  mode: auto ? "draft" : mode }),
         });
         if (!r.ok || !r.body) throw new Error(`服务端返回 ${r.status}`);
@@ -361,8 +451,17 @@ export default function App() {
             if (!line.startsWith("data:")) continue;
             const payload = line.slice(5).trim();
             if (!payload || payload === "[DONE]") continue;
-            const parsed = JSON.parse(payload) as { text?: string; error?: string };
+            const parsed = JSON.parse(payload) as {
+              text?: string; error?: string; evidence?: Evidence;
+            };
             if (parsed.error) throw new Error(parsed.error);
+            // 被新要求掐掉的旧流，剩下的字一律丢弃
+            if (!mine()) continue;
+            if (parsed.evidence) {
+              const ev = parsed.evidence;
+              setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, evidence: ev } : d)));
+              continue;
+            }
             full += parsed.text ?? "";
             const cut = full.indexOf("---ZH---");
             const en = (cut >= 0 ? full.slice(0, cut) : full).trim();
@@ -370,14 +469,22 @@ export default function App() {
             setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, en, zh } : d)));
           }
         }
-        setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, done: true } : d)));
+        if (mine()) {
+          setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, done: true } : d)));
+        }
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        setDrafts((prev) =>
-          prev.map((d) => (d.id === id ? { ...d, done: true, error: `没写出来：${message}` } : d)),
-        );
+        if ((e as { name?: string })?.name === "AbortError") {
+          setDrafts((prev) =>
+            prev.map((d) => (d.id === id ? { ...d, done: true, error: "已被新的要求中断" } : d)),
+          );
+        } else {
+          const message = e instanceof Error ? e.message : String(e);
+          setDrafts((prev) =>
+            prev.map((d) => (d.id === id ? { ...d, done: true, error: `没写出来：${message}` } : d)),
+          );
+        }
       } finally {
-        setDrafting(false);
+        if (mine()) setDrafting(false);
       }
     },
     [drafts],
@@ -386,6 +493,27 @@ export default function App() {
   useEffect(() => {
     runDraftRef.current = runDraft;
   }, [runDraft]);
+
+  // 会中指示只认用户点过「存为会中指示」的那些，整表提交，服务端存进这一场的会议目录
+  const saveDirective = useCallback(
+    async (text: string) => {
+      const next = [...directives, { text, savedAt: Date.now() / 1000 }];
+      setDirectives(next);
+      setNotice("已存为会中指示，之后的拟稿都会照它来。");
+      try {
+        const r = await fetch("/api/conversation/directives", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ directives: next }),
+        });
+        const d = await r.json();
+        if (r.ok) setDirectives(d.directives);
+      } catch {
+        setNotice("会中指示没存上，检查一下服务端。");
+      }
+    },
+    [directives],
+  );
 
   const bars = [0.06, 0.16, 0.32];
 
@@ -428,6 +556,10 @@ export default function App() {
           </div>
         )}
         <span className="spacer" />
+        <button className="chip" onClick={() => setMeetingOpen(true)}>
+          会议
+          {meetingId ? `　#${meetingId}` : "　未开始"}
+        </button>
         <button className="chip" onClick={() => setSettingsOpen(true)}>
           模型设置
           {health && !health.ok ? "　未配好" : ""}
@@ -463,6 +595,17 @@ export default function App() {
             </p>
           )}
 
+          {link === "idle" && (
+            <Readiness
+              source={source}
+              micId={micId}
+              micLabel={mics.find((m) => m.id === micId)?.label ?? ""}
+              ctxInfo={ctxInfo}
+              profile={profile}
+              hasMeeting={meetingId !== null}
+            />
+          )}
+
           <div
             className="record-wrap"
             style={
@@ -477,18 +620,24 @@ export default function App() {
             <div className="recorder">
               {running ? (
                 <>
-                  <button className="rec-btn stop" onClick={stop}>
+                  <button className="rec-btn stop" disabled={link === "settling"} onClick={stop}>
                     <span className="seal-square" aria-hidden />
-                    停止记录
+                    {link === "settling" ? "正在收尾…" : "停止记录"}
                   </button>
-                  <button className="rec-btn pause" onClick={togglePause}>
+                  <button className="rec-btn pause" disabled={link === "settling"}
+                          onClick={togglePause}>
                     {link === "paused" ? "继续" : "暂停"}
                   </button>
                 </>
               ) : (
-                <button className="rec-btn" onClick={start}>
+                <button className="rec-btn" disabled={!canStart} title={startBlockReason}
+                        onClick={start}>
                   开始记录
                 </button>
+              )}
+              {!running && otherTabRecording && (
+                // 「还没有会议」那条已经写在会前检查面板里了，这里只补面板没覆盖的那一种
+                <span className="rec-block">另一个标签页正在录</span>
               )}
               <span className="timer">{clock(elapsed)}</span>
               <span className="meter" aria-hidden>
@@ -546,8 +695,10 @@ export default function App() {
           <Drafting
             drafts={drafts}
             busy={drafting}
+            directives={directives}
             onAsk={(instruction, mode) => runDraft(instruction, "fast", undefined, false, mode)}
             onRefine={(d) => runDraft(d.instruction, "good", d.id)}
+            onSaveDirective={saveDirective}
           />
         </section>
       </div>
@@ -560,9 +711,42 @@ export default function App() {
         <SettingsSheet onClose={() => setSettingsOpen(false)} onSaved={refreshHealth} />
       )}
 
+      {meetingOpen && (
+        <MeetingSheet
+          meetings={meetings}
+          meetingId={meetingId}
+          canAdopt={canAdopt}
+          docCount={ctxInfo?.docs.length ?? 0}
+          running={running}
+          onClose={() => setMeetingOpen(false)}
+          onSwitched={({ meetingId: id, context, profile: prof, turns, fresh }) => {
+            // 换会议是整套换：材料、会前交代、笔录、拟稿卡片一起换。
+            // 拟稿卡片会作为对话历史发给模型，留着上一场的就会继续影响这一场。
+            setMeetingId(id);
+            setCtxInfo(context);
+            setProfile(prof);
+            setDrafts([]);
+            setCanAdopt(false);
+            setEntries(
+              (turns ?? []).map((x) => ({
+                turnId: x.turnId,
+                pairs: [{ src: x.src, dst: x.dst }],
+                srcLang: x.srcLang,
+                echo: !x.dst,
+                ts: x.ts,
+              })),
+            );
+            setNotice(fresh ? "" : "已换成这一场自己的底稿与会前交代。");
+            fetch("/api/meetings").then((r) => r.json()).then(setMeetings).catch(() => {});
+          }}
+        />
+      )}
+
       {sheetOpen && (
         <ContextSheet
           info={ctxInfo}
+          profile={profile}
+          onProfileSaved={setProfile}
           onClose={() => setSheetOpen(false)}
           onUploaded={(info, briefingReset) => {
             setCtxInfo(info);

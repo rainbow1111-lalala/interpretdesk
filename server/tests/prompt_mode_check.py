@@ -23,9 +23,9 @@ DRAFT = "针对对方最后这段话，帮我拟一段英文回复。"
 
 def check_prompt() -> bool:
     ok = True
-    ask_p = drafting.build_prompt(CTX, TR, [], ASK, mode="ask")
-    draft_p = drafting.build_prompt(CTX, TR, [], DRAFT, mode="draft")
-    free_p = drafting.build_prompt(CTX, TR, [], ASK)
+    ask_p, _ = drafting.build_prompt(CTX, TR, [], ASK, mode="ask")
+    draft_p, _ = drafting.build_prompt(CTX, TR, [], DRAFT, mode="draft")
+    free_p, _ = drafting.build_prompt(CTX, TR, [], ASK)
     checks = {
         "ask 明确要中文简答": "用中文简短回答" in ask_p,
         "ask 不再要求 ---ZH---": "写完另起一行写 ---ZH---" not in ask_p,
@@ -47,7 +47,7 @@ async def check_model() -> bool:
     system = drafting.system_prompt(cfg.reply_lang)
     ok = True
     for mode, q, want_zh in (("ask", ASK, False), ("draft", DRAFT, True)):
-        prompt = drafting.build_prompt(CTX, TR, [], q, None, "", cfg.reply_lang, None, mode)
+        prompt, _ = drafting.build_prompt(CTX, TR, [], q, None, "", cfg.reply_lang, None, mode)
         out = ""
         async for chunk in llm.stream(cfg.text, cfg.strong_model(), prompt, system,
                                       temperature=0.4):

@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 BASE = f"http://127.0.0.1:{os.environ.get('MI_PORT', '8787')}"
-SHOTS = Path("/private/tmp/claude-501/-Users-rainbow/"
-             "e14a2e43-5cb9-4694-842f-4e8f380bab4f/scratchpad/shots")
+SHOTS = Path(os.environ.get("MI_SHOTS")
+             or (Path(tempfile.gettempdir()) / "mi-shots"))
 
 # 用真实回放里收到过的内容，不编造
 TURNS = [
@@ -112,6 +113,19 @@ def main() -> int:
         page.screenshot(path=str(SHOTS / "01-待机.png"))
         print("待机界面已截图")
 
+        # 会前检查面板：待机时三项都要在
+        ready = page.locator(".ready-row").count()
+        print(f"会前检查三项：{ready} 行")
+        # 没有会议时开始记录是灰的，且写明原因。建一场再录。
+        blocked = page.locator(".rec-btn[disabled]").count() == 1
+        print("没有会议时开始记录被挡：", "是" if blocked else "否")
+        page.click(".topbar .chip:has-text('会议')")
+        page.wait_for_selector(".mtg-new")
+        page.click(".mtg-new .chip.primary")
+        page.wait_for_selector(".sheet", state="detached", timeout=10000)
+        page.wait_for_selector(".rec-btn:not([disabled])", timeout=10000)
+        print("新建会议后开始记录可用")
+
         page.click(".rec-btn")
         page.wait_for_selector("text=正在同传", timeout=10000)
         page.wait_for_selector(".entry.speaking", timeout=10000)
@@ -141,16 +155,30 @@ def main() -> int:
         page.screenshot(path=str(SHOTS / "03-拟稿.png"))
         print("手动拟稿卡片已渲染（与自动建议并存）")
 
-        page.click(".topbar .chip")
+        # 依据区默认收起，不挤占正文
+        ev_open = page.locator(".evidence[open]").count()
+        ev_all = page.locator(".evidence").count()
+        print(f"依据折叠区 {ev_all} 处，默认展开 {ev_open} 处")
+
+        # 停止之后要先进「正在收尾」，服务端确认前不许弹纪要
+        page.click(".rec-btn.stop")
+        page.wait_for_selector("text=正在收尾", timeout=5000)
+        minutes_early = page.locator(".sheet h2:has-text('会议纪要')").count()
+        print("收尾期间纪要弹窗未出现：", "是" if minutes_early == 0 else "否")
+
+        page.click(".topbar .chip:has-text('会议底稿')")
         page.wait_for_selector(".sheet h2")
         page.wait_for_timeout(400)
         page.screenshot(path=str(SHOTS / "04-会议底稿.png"))
-        print("会议底稿抽屉已截图")
+        profile_rows = page.locator(".profile-row").count()
+        storage = page.locator(".storage").count()
+        print(f"会前交代 {profile_rows} 项，材料说明 {storage} 处")
 
         errors = page.evaluate("window.__errors || []")
         browser.close()
 
-    ok = entries >= 4 and frames["count"] > 0
+    ok = (entries >= 4 and frames["count"] > 0 and ready == 3 and blocked
+          and ev_open == 0 and minutes_early == 0 and profile_rows == 4 and storage == 1)
     print(f"\n音频帧是否真的发出：{'是' if frames['count'] else '否'}")
     print("结果：" + ("通过" if ok else "不通过"))
     if errors:

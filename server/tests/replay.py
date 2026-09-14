@@ -51,13 +51,32 @@ def fixture(kind: str) -> Path:
     return pcm
 
 
+
+def ensure_meeting() -> str:
+    """先建一场会议，返回带会话 id 的 Cookie 头。
+
+    以前每连一次 WebSocket 服务端就凭空建一场会议，现在会议要显式建，录音才有地方落。
+    """
+    import httpx
+    with httpx.Client(base_url=f"http://127.0.0.1:{PORT}", timeout=20) as c:
+        c.get("/api/health")
+        r = c.post("/api/meetings", json={"title": "回放自测"})
+        r.raise_for_status()
+        print(f"已建会议 #{r.json()['meetingId']}")
+        return "; ".join(f"{k}={v}" for k, v in c.cookies.items())
+
+
 async def replay(kind: str) -> bool:
     pcm = fixture(kind).read_bytes()
     seconds = len(pcm) / 32000
     print(f"喂入 {kind} 样例 {seconds:.1f} 秒，按实时速度发送\n")
     first_src = first_dst = None
     turns: list[dict] = []
-    async with websockets.connect(WS, max_size=None) as ws:
+    ended: dict | None = None
+    # 录音要先有会议。同一个 cookie 才算同一个浏览器，所以连 WebSocket 时把它带上。
+    cookie = ensure_meeting()
+    async with websockets.connect(WS, max_size=None,
+                                  additional_headers={"Cookie": cookie}) as ws:
         t0 = time.monotonic()
 
         async def feed():
@@ -88,6 +107,11 @@ async def replay(kind: str) -> bool:
                     if msg.get("dst") and first_dst is None:
                         first_dst = dt
                     print(f"[{dt:5.2f}s] 进行中 原话={msg['src'][-46:]!r} 译文={msg['dst'][-30:]!r}")
+                elif kind_ == "ended":
+                    ended = msg
+                    print(f"[{dt:5.2f}s] 收尾完成，落库 {msg.get('turns')} 段，"
+                          f"服务端确认={msg.get('settled')}，用时 {msg.get('seconds')} 秒")
+                    break
                 elif kind_ == "turn":
                     turns.append(msg)
                     print(f"[{dt:5.2f}s] 段落收口 #{msg['turnId']}，{len(msg['pairs'])} 组句对")

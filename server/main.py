@@ -23,8 +23,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import (config, context_store, drafting, export_doc, llm, minutes,
-               qwen_live, retrieval, store)
+from . import (config, context_store, drafting, evidence, export_doc, llm,
+               minutes, qwen_live, retrieval, store)
 from . import settings as settings_mod
 from .live_client import LiveTranslateClient
 from .segmenter import TurnBuilder
@@ -43,27 +43,66 @@ app.add_middleware(
 
 
 class State:
-    """一个会话的内存状态。会话之间不共享任何东西。"""
+    """一个会话的内存状态。会话之间不共享任何东西。
+
+    工作区有两层，分清楚哪一层管什么是这个类唯一要紧的事：
+
+    - `sws` 会话根：模型设置、SQLite 会议库、纪要目录、活动会议指针。这些属于这个人，
+      不属于某一场会。
+    - `mws` 当前这场会议：上传的原文、提炼出的摘要、向量索引、会前交代与有效指示。
+      换一场会就整个换掉。还没有会议时是 None。
+
+    属性名从原来的 `ws` 改成 `sws`，是为了让所有旧调用点当场报 AttributeError，逼着逐个
+    点位重新判断该用哪一层。留一个 `ws` 兼容属性等于给串号留后门。
+    """
 
     def __init__(self, sid: str) -> None:
         self.sid = sid
-        self.ws = config.Workspace.for_session(sid)
-        self.context = context_store.load(self.ws)
-        self.settings = settings_mod.load(self.ws)
+        self.sws = config.Workspace.for_session(sid)
+        self.settings = settings_mod.load(self.sws)
         self.seen_at = time.time()
         self.turns: list[dict] = []
         # 后台预取的原文片段，拟稿时直接用，不在关键路径上再做检索
         self.excerpts: list[dict] = []
         self.meeting_id: int | None = None
+        self.mws: config.Workspace | None = None
+        self.context = context_store.MeetingContext()
+        self.conversation: dict = store._blank_conversation()
         # 正在跑的字幕流水线。它在连接建立时拿的是当时的术语表快照，底稿一变必须推给它，
         # 否则会中换掉或清空底稿之后，字幕还在按已经删掉的底稿改译法
         self.builder: TurnBuilder | None = None
+        # 同一个浏览器同时只允许一路录音。这是权威的那一层，浏览器侧的互斥只管体验。
+        self.live_ws: WebSocket | None = None
+        self.live_since = 0.0
+        self.adopt_active()
 
-    def reset_meeting(self, title: str = "") -> int:
-        self.turns = []
-        self.excerpts = []
-        self.meeting_id = store.start_meeting(self.ws, title)
-        return self.meeting_id
+    def adopt_active(self) -> None:
+        """进程重启或新建 State 时，把上次那场会接回来。"""
+        meeting_id = store.load_active(self.sws)
+        if meeting_id is None:
+            return
+        self.bind_meeting(meeting_id, load_turns=True)
+
+    def bind_meeting(self, meeting_id: int, load_turns: bool = False) -> None:
+        """把内存状态整体切到某一场会议上。
+
+        材料、摘要、交代、指示、预取片段、字幕术语表六处必须一起换，漏一处就是上一场的
+        内容渗进这一场。
+        """
+        self.meeting_id = meeting_id
+        self.mws = self.sws.for_meeting(meeting_id)
+        self.context = context_store.load(self.mws)
+        self.conversation = store.load_conversation(self.mws)
+        if load_turns:
+            self.turns = store.get_turns(self.sws, meeting_id)[-200:]
+        self.drop_briefing_traces()
+
+    def materials(self) -> config.Workspace:
+        """要读写这一场会议材料的地方。没有会议时调用方必须先挡下来，不许退回会话根。"""
+        if self.mws is None:
+            raise HTTPException(status_code=409,
+                                detail="还没有会议。先新建一场会议，或者继续上一场。")
+        return self.mws
 
     def drop_briefing_traces(self) -> None:
         """底稿变了，把内存里跟着旧底稿走的东西一并换掉。
@@ -167,7 +206,7 @@ async def get_langs(s: State = Depends(current)) -> dict:
 
 @app.post("/api/settings")
 async def post_settings(patch: dict, s: State = Depends(current)) -> dict:
-    s.settings = settings_mod.save(s.ws, s.settings, patch)
+    s.settings = settings_mod.save(s.sws, s.settings, patch)
     return {"settings": s.settings.redacted()}
 
 
@@ -228,12 +267,19 @@ async def get_context(s: State = Depends(current)) -> dict:
 
 
 def _context_payload(s: State) -> dict:
-    """几个改底稿的接口都要回这份，抽出来免得互相调用还要转一手会话。"""
+    """几个改底稿的接口都要回这份，抽出来免得互相调用还要转一手会话。
+
+    还没有会议时不报错，回一份空壳，界面照常渲染并提示先新建会议。只有要写材料的接口
+    才拦（见 State.materials）。
+    """
     ctx = s.context
+    mws = s.mws
     return {"matter": ctx.matter, "parties": ctx.parties, "issues": ctx.issues,
             "terms": ctx.terms, "myPosition": ctx.my_position, "sources": ctx.sources,
             "glossarySize": len(ctx.glossary()),
-            "docs": retrieval.list_docs(s.ws), "indexChunks": retrieval.index_size(s.ws)}
+            "meetingId": s.meeting_id,
+            "docs": retrieval.list_docs(mws) if mws else [],
+            "indexChunks": retrieval.index_size(mws) if mws else 0}
 
 
 @app.post("/api/context")
@@ -242,6 +288,7 @@ async def post_context(files: list[UploadFile] = File(default=[]),
                        replace: bool = Form(default=False),
                        s: State = Depends(current)) -> dict:
     """replace=True 换一场会（旧原文挪进回收站），False 给同一场会补材料。"""
+    mws = s.materials()
     tmpdir = Path(tempfile.mkdtemp(prefix="mi-ctx-"))
     try:
         paths = []
@@ -259,24 +306,34 @@ async def post_context(files: list[UploadFile] = File(default=[]),
             dest = tmpdir / Path(f.filename).name
             dest.write_bytes(blob)
             paths.append(dest)
-        # 单次限额挡不住反复上传，会话总量也要看住
-        stored_paths = list(s.ws.docs.glob("*.txt")) if s.ws.docs.exists() else []
+        # 单次限额挡不住反复上传，一场会的总量也要看住
+        stored_paths = list(mws.docs.glob("*.txt")) if mws.docs.exists() else []
         stored = sum(p.stat().st_size for p in stored_paths)
         # replace=True 旧原文进回收站，只数本次这批
         kept = 0 if replace else len(stored_paths)
         if kept + len(paths) > config.MAX_SESSION_DOCS:
             raise HTTPException(
                 status_code=413,
-                detail=f"一个会话最多存 {config.MAX_SESSION_DOCS} 份底稿，"
+                detail=f"一场会议最多存 {config.MAX_SESSION_DOCS} 份底稿，"
                        f"当前已存 {kept} 份、本次 {len(paths)} 份。"
                        f"请先删掉用不上的，或选「换成新底稿」")
         if not replace and stored + total > config.MAX_SESSION_BYTES:
             raise HTTPException(
                 status_code=413,
-                detail=f"这个会话已存的底稿加上本次上传超过 "
+                detail=f"这场会议已存的底稿加上本次上传超过 "
                        f"{config.MAX_SESSION_BYTES // 1024 // 1024} MB，"
                        f"请先删掉用不上的文件，或选「换成新底稿」")
-        s.context = await context_store.build(s.ws, paths, note, replace)
+        # 材料按会议分开存之后，上面两道都成了单场的限额，会话总量就此没有上限。
+        # 开几十场会照样能把磁盘塞满，所以再看一眼这个会话所有会议的总占用。
+        root = mws.meeting_data
+        session_total = sum(f.stat().st_size for f in root.rglob("*.txt")) if root.exists() else 0
+        if session_total + total > config.MAX_SESSION_TOTAL_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"这个会话所有会议的材料合计超过 "
+                       f"{config.MAX_SESSION_TOTAL_BYTES // 1024 // 1024} MB，"
+                       f"请先清掉用不上的历史会议材料")
+        s.context = await context_store.build(mws, paths, note, replace)
         s.drop_briefing_traces()
     except HTTPException:
         # 超限一类的 413 要原样回给用户，别被下面裹成 502，否则界面提示会答非所问
@@ -293,7 +350,7 @@ async def post_context(files: list[UploadFile] = File(default=[]),
 @app.post("/api/context/reload")
 async def reload_context(s: State = Depends(current)) -> dict:
     """摘要存在会话目录的 context.json，手改过之后按这里重新读，不必重新上传文件。"""
-    s.context = context_store.load(s.ws)
+    s.context = context_store.load(s.materials())
     return _context_payload(s)
 
 
@@ -304,11 +361,12 @@ async def clear_context(s: State = Depends(current)) -> dict:
     原文与摘要都挪进 data/trash/<时间戳>/，不真删。有过一次教训：会前底稿被一条 DELETE
     清掉之后无从恢复，只能重新整理重新上传。
     """
-    bin_dir = retrieval.clear_docs(s.ws)
-    if bin_dir and s.ws.brief.exists():
-        shutil.copy2(s.ws.brief, bin_dir / "context.json")
+    mws = s.materials()
+    bin_dir = retrieval.clear_docs(mws)
+    if bin_dir and mws.brief.exists():
+        shutil.copy2(mws.brief, bin_dir / "context.json")
     s.context = context_store.MeetingContext()
-    context_store.save(s.ws, s.context)
+    context_store.save(mws, s.context)
     s.drop_briefing_traces()
     return _context_payload(s)
 
@@ -316,7 +374,7 @@ async def clear_context(s: State = Depends(current)) -> dict:
 @app.delete("/api/context/docs/{name}")
 async def delete_doc(name: str, s: State = Depends(current)) -> dict:
     """删掉某一份原文。摘要不会自动重算，需要重新点读进来。"""
-    retrieval.remove_doc(s.ws, name)
+    retrieval.remove_doc(s.materials(), name)
     s.drop_briefing_traces()
     return _context_payload(s)
 
@@ -330,11 +388,13 @@ async def prefetch_excerpts(payload: dict, s: State = Depends(current)) -> dict:
     """
     query = (payload.get("query") or "").strip()
     cfg = s.settings
-    if not query or len(retrieval.all_text(s.ws, 10 ** 9)) <= cfg.context_full_chars:
+    mws = s.mws
+    if (not query or mws is None
+            or len(retrieval.all_text(mws, 10 ** 9)) <= cfg.context_full_chars):
         return {"chunks": len(s.excerpts)}
     recent = " ".join((t.get("src") or "") for t in s.turns[-1:]).strip()
     try:
-        s.excerpts = await retrieval.search(s.ws, cfg.text, cfg.embed_model,
+        s.excerpts = await retrieval.search(mws, cfg.text, cfg.embed_model,
                                             f"{query} {recent}".strip(), k=8)
     except Exception as exc:
         log.warning("按输入预取片段失败：%s：%s", type(exc).__name__, exc)
@@ -349,7 +409,7 @@ async def search_docs(payload: dict, s: State = Depends(current)) -> dict:
         return {"hits": []}
     cfg = s.settings
     try:
-        hits = await retrieval.search(s.ws, cfg.text, cfg.embed_model, query,
+        hits = await retrieval.search(s.materials(), cfg.text, cfg.embed_model, query,
                                       int(payload.get("k") or 3))
         return {"hits": hits}
     except Exception as exc:
@@ -361,24 +421,65 @@ async def search_docs(payload: dict, s: State = Depends(current)) -> dict:
 async def post_draft(payload: dict, s: State = Depends(current)) -> StreamingResponse:
     instruction = (payload.get("instruction") or "").strip()
     history = payload.get("history") or []
-    # 他手打的要求（自动建议那条固定指令不算），会中改口靠它一直生效
-    directives = [str(d).strip() for d in (payload.get("directives") or []) if str(d).strip()]
+    # 会中指示由用户显式保存，存在这场会议的 conversation.json 里，不从聊天记录反推。
+    # 原来是前端从拟稿卡片猜出来再发上来的，猜错了就是按被推翻的旧方案继续答。
+    directives = [str(d.get("text", "")).strip()
+                  for d in (s.conversation.get("directives") or [])
+                  if str(d.get("text", "")).strip()]
+    mws = s.materials()
     quality = payload.get("quality") or "fast"
     # draft=要我拟稿，ask=问我含义或让我判断形势，空=自由输入，分不清就让模型自己认
     mode = payload.get("mode") if payload.get("mode") in ("draft", "ask") else ""
     if not instruction:
         return StreamingResponse(iter(["data: \n\n"]), media_type="text/event-stream")
 
+    def sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
     async def gen():
+        """正文一个字都不缓冲地往外流，依据区留到最后核验完再发。
+
+        只有一处例外：依据区的起始标记可能被模型切在两个 chunk 中间（「---依」加「据---」），
+        所以永远压着最后几个字符不发，等下一块到了再判断。几个字符的延迟肉眼不可见，
+        漏出半截标记却会直接出现在用户看到的正文里。
+        """
+        hold = len(evidence.REF_MARK) - 1
+        buf = ""          # 还没确定能不能发的尾巴
+        tail = ""         # 进入依据区之后的全部文本
+        in_ref = False
+        sources: dict[str, dict] = {}
+        profile = s.conversation.get("profile") or {}
         try:
             async for chunk in drafting.stream_draft(
-                    s.ws, s.context, s.turns, history, instruction, quality,
-                    s.excerpts, directives, mode):
-                yield f"data: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
+                    mws, s.context, s.turns, history, instruction, quality,
+                    s.excerpts, directives, mode, profile, sources):
+                if in_ref:
+                    tail += chunk
+                    continue
+                buf += chunk
+                cut = buf.find(evidence.REF_MARK)
+                if cut >= 0:
+                    head, tail = buf[:cut], buf[cut + len(evidence.REF_MARK):]
+                    in_ref = True
+                    if head:
+                        yield sse({"text": head})
+                    continue
+                if len(buf) > hold:
+                    yield sse({"text": buf[:-hold]})
+                    buf = buf[-hold:]
+            if not in_ref and buf:
+                yield sse({"text": buf})
         except Exception as exc:
             log.exception("拟稿失败")
             msg = f"拟稿失败：{type(exc).__name__} {exc}"[:300]
-            yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
+            yield sse({"error": msg})
+        else:
+            if in_ref:
+                ref_text, todo_text = tail, ""
+                if evidence.TODO_MARK in tail:
+                    ref_text, todo_text = tail.split(evidence.TODO_MARK, 1)
+                yield sse({"evidence": evidence.parse_and_verify(
+                    ref_text, todo_text, sources)})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream",
@@ -386,41 +487,183 @@ async def post_draft(payload: dict, s: State = Depends(current)) -> StreamingRes
                                       "X-Accel-Buffering": "no"})
 
 
+def _meeting_row(s: State, row: dict) -> dict:
+    """列表里每一行要让人看出这是哪一场：有没有材料、有没有纪要、是不是当前这场。"""
+    mid = row["id"]
+    mws = s.sws.for_meeting(mid)
+    docs = len(list(mws.docs.glob("*.txt"))) if mws.docs.exists() else 0
+    conv = store.load_conversation(mws) if mws.conversation.exists() else {}
+    profile = conv.get("profile") or {}
+    return {**row, "docCount": docs,
+            "hasProfile": any(str(v).strip() for v in profile.values()),
+            "hasMinutes": (mws.minutes / f"{mid}.md").exists(),
+            "active": mid == s.meeting_id}
+
+
 @app.get("/api/meetings")
 async def get_meetings(s: State = Depends(current)) -> list[dict]:
-    return store.list_meetings(s.ws)
+    return [_meeting_row(s, row) for row in store.list_meetings(s.sws)]
+
+
+@app.get("/api/meetings/active")
+async def get_active_meeting(s: State = Depends(current)) -> dict:
+    """页面加载时调一次，把上一场会接回来。没有会议时 meetingId 为 null。"""
+    if s.meeting_id is None:
+        return {"meetingId": None, "canAdopt": _can_adopt(s),
+                "context": _context_payload(s), "conversation": s.conversation}
+    return {"meetingId": s.meeting_id, "canAdopt": False,
+            "context": _context_payload(s), "conversation": s.conversation,
+            "turns": store.get_turns(s.sws, s.meeting_id)}
+
+
+def _can_adopt(s: State) -> bool:
+    """首场会议可以沿用会话根上已经准备好的材料。
+
+    判据是这个会话有没有走过分场流程，不是会议库里有没有行：旧代码每次连 WebSocket 就建
+    一场会议，库里早堆了一批空行，拿它判会永远判成不是首场。
+    """
+    if s.sws.meeting_data.exists():
+        return False
+    return s.sws.brief.exists() or (s.sws.docs.exists()
+                                    and any(s.sws.docs.glob("*.txt")))
+
+
+def _adopt_session_root(s: State, mws: config.Workspace) -> bool:
+    """把会话根上的既有材料复制一份进这场新会议。
+
+    复制而不是搬走：会话根的原件原样留着，从此成为只读存档，之后所有上传、删除、清空都
+    只作用于会议目录。这样既满足「不迁移或覆盖旧材料」，也让 Workspace 保持成一条没有
+    分支的路径推导规则，不必在隔离的关键路径上加回退逻辑。
+    """
+    copied = False
+    if s.sws.docs.exists():
+        mws.docs.mkdir(parents=True, exist_ok=True)
+        for src in s.sws.docs.glob("*.txt"):
+            shutil.copy2(src, mws.docs / src.name)
+            copied = True
+    for attr in ("brief", "index"):
+        src = getattr(s.sws, attr)
+        if src.exists():
+            dst = getattr(mws, attr)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied = True
+    return copied
+
+
+@app.post("/api/meetings")
+async def create_meeting(payload: dict | None = None,
+                         s: State = Depends(current)) -> dict:
+    """新建一场会议。首场可以沿用已有材料，之后每一场都是空白的。"""
+    payload = payload or {}
+    title = str(payload.get("title") or "").strip()
+    adopt = bool(payload.get("adoptExisting")) and _can_adopt(s)
+    meeting_id = store.start_meeting(s.sws, title)
+    mws = s.sws.for_meeting(meeting_id)
+    mws.root.mkdir(parents=True, exist_ok=True)
+    adopted = await asyncio.to_thread(_adopt_session_root, s, mws) if adopt else False
+    store.save_active(s.sws, meeting_id)
+    s.turns = []
+    s.bind_meeting(meeting_id)
+    return {"meetingId": meeting_id, "adopted": adopted,
+            "context": _context_payload(s), "conversation": s.conversation,
+            "meetings": [_meeting_row(s, row) for row in store.list_meetings(s.sws)]}
+
+
+@app.post("/api/meetings/{meeting_id}/resume")
+async def resume_meeting(meeting_id: int, s: State = Depends(current)) -> dict:
+    """恢复历史会议，用的是那一场自己的材料，当前底稿一概不带过去。"""
+    if s.live_ws is not None:
+        raise HTTPException(status_code=409,
+                            detail="正在录音，先停止记录再切换会议。")
+    if not store.meeting_exists(s.sws, meeting_id):
+        raise HTTPException(status_code=404, detail="没有这场会议")
+    store.save_active(s.sws, meeting_id)
+    s.bind_meeting(meeting_id, load_turns=True)
+    return {"meetingId": meeting_id, "context": _context_payload(s),
+            "conversation": s.conversation, "turns": s.turns,
+            "hasMaterials": bool(s.context.sources or s.context.matter)}
+
+
+@app.get("/api/conversation")
+async def get_conversation(s: State = Depends(current)) -> dict:
+    return s.conversation
+
+
+@app.put("/api/conversation/profile")
+async def put_profile(payload: dict, s: State = Depends(current)) -> dict:
+    """会前交代由用户本人填写，不从材料里提炼，也不替他补默认身份。"""
+    mws = s.materials()
+    keys = ("identity", "goal", "facts", "noCommit")
+    s.conversation["profile"] = {k: str(payload.get(k) or "").strip() for k in keys}
+    store.save_conversation(mws, s.conversation)
+    return {"profile": s.conversation["profile"]}
+
+
+@app.put("/api/conversation/directives")
+async def put_directives(payload: dict, s: State = Depends(current)) -> dict:
+    """整表提交。会中指示只认用户显式保存的这一份，不从聊天记录猜。"""
+    mws = s.materials()
+    items = []
+    for raw in (payload.get("directives") or [])[:50]:
+        text = str(raw.get("text") if isinstance(raw, dict) else raw or "").strip()
+        if text:
+            items.append({"text": text[:500],
+                          "savedAt": float(raw.get("savedAt") or time.time())
+                          if isinstance(raw, dict) else time.time()})
+    s.conversation["directives"] = items
+    store.save_conversation(mws, s.conversation)
+    return {"directives": items}
 
 
 @app.get("/api/meetings/{meeting_id}/export.md")
 async def export_meeting(meeting_id: int,
                          s: State = Depends(current)) -> PlainTextResponse:
     """只要逐句记录，不含纪要正文。"""
-    return PlainTextResponse(store.export_markdown(s.ws, meeting_id),
+    return PlainTextResponse(store.export_markdown(s.sws, meeting_id),
                              media_type="text/markdown; charset=utf-8")
+
+
+def _meeting_ws(s: State, meeting_id: int) -> config.Workspace:
+    """按 URL 里的编号取工作区，不看当前活动的是哪一场。
+
+    纪要与导出可以针对任意一场历史会议。库与纪要目录挂在共享根，所以这个工作区同时给出
+    正确的库和那一场自己的底稿；用 s.context（当前这场的底稿）给历史会议出纪要，就是把
+    这一场的立场写进上一场的记录里。
+    """
+    return s.sws.for_meeting(meeting_id)
 
 
 @app.post("/api/meetings/{meeting_id}/minutes")
 async def make_minutes(meeting_id: int, s: State = Depends(current)) -> dict:
     """让强档模型整理纪要。不赶时间，用强档，返回 markdown 供预览。"""
+    # 还在录音就不许出纪要：尾句可能还没落库，出来的纪要会少最后一段。
+    if s.live_ws is not None and s.meeting_id == meeting_id:
+        raise HTTPException(status_code=409,
+                            detail="这场会还在录音。先停止记录，等服务端确认收尾完成。")
+    mws = _meeting_ws(s, meeting_id)
+    ctx = s.context if s.meeting_id == meeting_id else context_store.load(mws)
     try:
-        text = await minutes.generate(s.ws, meeting_id, s.context)
+        text = await minutes.generate(mws, meeting_id, ctx)
     except Exception as exc:
         log.exception("生成纪要失败")
         raise HTTPException(status_code=502,
                             detail=f"{type(exc).__name__}：{exc}"[:300]) from exc
     return {"markdown": text, "title": minutes.title_of(text),
-            "full": export_doc.full_markdown(s.ws, meeting_id, text)}
+            "full": export_doc.full_markdown(mws, meeting_id, text)}
 
 
 @app.get("/api/meetings/{meeting_id}/minutes")
 async def get_minutes(meeting_id: int, s: State = Depends(current)) -> dict:
-    text = minutes.load(s.ws, meeting_id)
+    mws = _meeting_ws(s, meeting_id)
+    text = minutes.load(mws, meeting_id)
     return {"markdown": text, "title": minutes.title_of(text) if text else "",
-            "full": export_doc.full_markdown(s.ws, meeting_id, text) if text else ""}
+            "full": export_doc.full_markdown(mws, meeting_id, text) if text else ""}
 
 
 def _download_name(s: State, meeting_id: int, suffix: str) -> str:
-    title = minutes.title_of(minutes.load(s.ws, meeting_id), "会议纪要")[:30]
+    title = minutes.title_of(minutes.load(_meeting_ws(s, meeting_id), meeting_id),
+                             "会议纪要")[:30]
     stamp = datetime.now().strftime("%y%m%d")
     return f"【{stamp}】{title}.{suffix}"
 
@@ -428,7 +671,7 @@ def _download_name(s: State, meeting_id: int, suffix: str) -> str:
 @app.get("/api/meetings/{meeting_id}/minutes.md")
 async def minutes_md(meeting_id: int,
                      s: State = Depends(current)) -> PlainTextResponse:
-    text = export_doc.full_markdown(s.ws, meeting_id)
+    text = export_doc.full_markdown(_meeting_ws(s, meeting_id), meeting_id)
     if not text.strip():
         raise HTTPException(status_code=404, detail="这场会议还没有记录")
     return PlainTextResponse(text, media_type="text/markdown; charset=utf-8",
@@ -439,10 +682,11 @@ async def minutes_md(meeting_id: int,
 
 @app.get("/api/meetings/{meeting_id}/minutes.docx")
 async def minutes_docx(meeting_id: int, s: State = Depends(current)) -> FileResponse:
-    text = export_doc.full_markdown(s.ws, meeting_id)
+    mws = _meeting_ws(s, meeting_id)
+    text = export_doc.full_markdown(mws, meeting_id)
     if not text.strip():
         raise HTTPException(status_code=404, detail="这场会议还没有记录")
-    path = s.ws.minutes / f"{meeting_id}.docx"
+    path = mws.minutes / f"{meeting_id}.docx"
     await asyncio.to_thread(export_doc.to_docx, text, path)
     return FileResponse(path, filename=_download_name(s, meeting_id, "docx"),
                         media_type="application/vnd.openxmlformats-officedocument"
@@ -451,13 +695,14 @@ async def minutes_docx(meeting_id: int, s: State = Depends(current)) -> FileResp
 
 @app.get("/api/meetings/{meeting_id}/minutes.pdf")
 async def minutes_pdf(meeting_id: int, s: State = Depends(current)) -> FileResponse:
-    text = export_doc.full_markdown(s.ws, meeting_id)
+    mws = _meeting_ws(s, meeting_id)
+    text = export_doc.full_markdown(mws, meeting_id)
     if not text.strip():
         raise HTTPException(status_code=404, detail="这场会议还没有记录")
-    docx_path = s.ws.minutes / f"{meeting_id}.docx"
+    docx_path = mws.minutes / f"{meeting_id}.docx"
     await asyncio.to_thread(export_doc.to_docx, text, docx_path)
     try:
-        pdf_path = await asyncio.to_thread(export_doc.to_pdf, docx_path, s.ws.minutes)
+        pdf_path = await asyncio.to_thread(export_doc.to_pdf, docx_path, mws.minutes)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)[:300]) from exc
     return FileResponse(pdf_path, filename=_download_name(s, meeting_id, "pdf"),
@@ -470,7 +715,10 @@ async def refresh_excerpts(s: State) -> None:
     放在后台是为了把向量往返移出拟稿的关键路径。原文全部装进上下文时不必检索，直接清空。
     """
     cfg = s.settings
-    stored = len(retrieval.all_text(s.ws, 10 ** 9))
+    if s.mws is None:
+        s.excerpts = []
+        return
+    stored = len(retrieval.all_text(s.mws, 10 ** 9))
     if stored <= cfg.context_full_chars:
         s.excerpts = []
         return
@@ -479,7 +727,7 @@ async def refresh_excerpts(s: State) -> None:
         return
     try:
         # 预取在后台，捞 8 块和捞 3 块对首字延迟没有区别，多捞提高命中率
-        s.excerpts = await retrieval.search(s.ws, cfg.text, cfg.embed_model, query, k=8)
+        s.excerpts = await retrieval.search(s.mws, cfg.text, cfg.embed_model, query, k=8)
     except Exception as exc:
         log.warning("预取原文片段失败：%s：%s", type(exc).__name__, exc)
 
@@ -499,6 +747,26 @@ async def ws_live(ws: WebSocket) -> None:
     send_lock = asyncio.Lock()
     want_audio = False
 
+    async def refuse(code: str, detail: str, close_code: int) -> None:
+        try:
+            await ws.send_text(json.dumps({"type": "error", "code": code,
+                                           "detail": detail}, ensure_ascii=False))
+        except Exception:
+            pass
+        await ws.close(code=close_code)
+
+    # 没有会议就不许录。原来是每连一次 WebSocket 就凭空建一场，笔录因此散落在一堆
+    # 没人认领的会议行里，也没法把材料归到某一场。
+    if s.meeting_id is None:
+        await refuse("no_meeting", "还没有会议。先新建一场会议，或者继续上一场。", 4003)
+        return
+    # 同一个浏览器同时只允许一路录音。两个标签页同时录，两条流会抢同一个断句器，
+    # 落库的段落互相穿插。这是权威的那一层，浏览器侧的互斥只管提示得快一点。
+    if s.live_ws is not None and time.time() - s.live_since < 6 * 3600:
+        await refuse("busy", "这个浏览器已经有一场会议在录音了。", 4002)
+        return
+    s.live_ws, s.live_since = ws, time.time()
+
     async def send(obj: dict) -> None:
         async with send_lock:
             try:
@@ -515,7 +783,7 @@ async def ws_live(ws: WebSocket) -> None:
                             "srcLang": event.get("srcLang", "")})
             s.turns[:] = s.turns[-200:]
             if s.meeting_id and merged_src:
-                store.add_turn(s.ws, s.meeting_id, event["turnId"], merged_src,
+                store.add_turn(s.sws, s.meeting_id, event["turnId"], merged_src,
                                merged_dst, event.get("srcLang", ""))
             asyncio.create_task(refresh_excerpts(s))
         await send(event)
@@ -549,7 +817,8 @@ async def ws_live(ws: WebSocket) -> None:
                                          cfg.target_lang)
     else:
         client = LiveTranslateClient(on_live, cfg.target_lang)
-    s.reset_meeting()
+    # 会议由 /api/meetings 显式建立，连接这里只是加入当前这一场，不再凭空新建
+    s.excerpts = []
     await send({"type": "meeting", "meetingId": s.meeting_id,
                 "glossarySize": len(s.context.glossary())})
 
@@ -579,26 +848,48 @@ async def ws_live(ws: WebSocket) -> None:
                 if action == "audio":
                     want_audio = bool(cmd.get("on"))
                 if action == "reload_context":
-                    s.context = context_store.load(s.ws)
+                    s.context = context_store.load(s.mws)
                     builder.set_glossary(s.context.glossary())
                     await send({"type": "meeting", "meetingId": s.meeting_id,
                                 "glossarySize": len(s.context.glossary())})
     except WebSocketDisconnect:
         pass
     finally:
-        # 先让模型把最后一句吐完再收摊，否则尾巴会丢
+        # 收口。原来是固定睡 3.5 秒再收摊，而实测百炼的原话比译文晚 6.6 秒到，
+        # 固定等就是在赌尾句能不能赶上；现在等服务端的结束信号，等到立刻走，
+        # 等不到最多等 SETTLE_MAX_S，无论哪种都要落库之后才告诉前端结束。
+        began = time.monotonic()
         client.stop()
+        await send({"type": "status", "state": "settling"})
+        settled = False
+        try:
+            await asyncio.wait_for(client.finished.wait(), timeout=config.SETTLE_MAX_S)
+            settled = True
+        except asyncio.TimeoutError:
+            log.warning("等语音服务确认结束超时（%.1f 秒），按现有内容收口",
+                        config.SETTLE_MAX_S)
+        # 结束信号到了，零星片段可能还在路上，等断句器真的安静下来
+        while (time.monotonic() - began < config.SETTLE_MAX_S
+               and builder.open
+               and time.monotonic() - builder.last_at < config.SETTLE_QUIET_S):
+            await asyncio.sleep(0.15)
         idler.cancel()
-        # 模型在收到音频结束后还要几秒才吐完，固定等一段，不用空闲判据（它会在
-        # 模型吐字的自然间隙里误判成已经结束，把最后半句切掉）
-        await asyncio.sleep(3.5)
-        await builder.close()
+        await builder.close(final=True)
         runner.cancel()
         await asyncio.gather(runner, idler, return_exceptions=True)
         if s.builder is builder:
             s.builder = None
-        log.info("会议结束：音频 token %d，输出 token %d",
-                 client.audio_tokens, client.response_tokens)
+        if s.live_ws is ws:
+            s.live_ws = None
+        stored = len(store.get_turns(s.sws, s.meeting_id)) if s.meeting_id else 0
+        await send({"type": "ended", "meetingId": s.meeting_id, "turns": stored,
+                    "settled": settled,
+                    "seconds": round(time.monotonic() - began, 2)})
+        # 给上面这条消息一个出网的机会，随后返回会关掉连接
+        await asyncio.sleep(0.05)
+        log.info("会议结束：音频 token %d，输出 token %d，收口 %.1f 秒，确认=%s",
+                 client.audio_tokens, client.response_tokens,
+                 time.monotonic() - began, settled)
 
 
 async def _sweep_sessions() -> None:
