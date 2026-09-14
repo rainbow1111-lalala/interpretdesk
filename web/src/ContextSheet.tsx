@@ -1,16 +1,74 @@
-import { useState } from "react";
-import type { ContextInfo } from "./types";
+import { useEffect, useState } from "react";
+import type { ContextInfo, Profile } from "./types";
+
+const BLANK_PROFILE: Profile = { identity: "", goal: "", facts: "", noCommit: "" };
+
+// 四项都由使用者自己填。程序不从材料里提炼身份，也不按行业惯例替他补一个：
+// 猜错身份的代价是整场会的口径都偏了。
+const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string }[] = [
+  { key: "identity", label: "我的身份",
+    placeholder: "例如：某制造企业的采购经理，代表买方" },
+  { key: "goal", label: "本场目标",
+    placeholder: "例如：把单价压到十二元以内，账期争取到六十天" },
+  { key: "facts", label: "已确认的事实",
+    placeholder: "可以直接引用的事实，例如：上一批单价十四元，年采购量约三十万件" },
+  { key: "noCommit", label: "不可承诺的事项",
+    placeholder: "例如：不承诺全年采购量，不确认交付日期，不代表总部表态" },
+];
 
 export function ContextSheet({
   info,
+  profile,
+  onProfileSaved,
   onClose,
   onUploaded,
 }: {
   info: ContextInfo | null;
+  profile: Profile | null;
+  onProfileSaved: (p: Profile) => void;
   onClose: () => void;
   // briefingReset 表示这一次是换掉或清空了底稿，不是给同一场会补材料
   onUploaded: (info: ContextInfo, briefingReset?: boolean) => void;
 }) {
+  const [draftProfile, setDraftProfile] = useState<Profile>(profile ?? BLANK_PROFILE);
+  const [profileState, setProfileState] = useState<"idle" | "saving" | "saved">("idle");
+  const [provider, setProvider] = useState("");
+
+  useEffect(() => {
+    setDraftProfile(profile ?? BLANK_PROFILE);
+  }, [profile]);
+
+  // 材料会发给哪一家，写实填进去而不是写一句套话。存在哪、交给谁处理，是两件事。
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((d) => {
+        try {
+          setProvider(new URL(d.settings?.text?.base_url ?? "").hostname);
+        } catch {
+          setProvider("");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveProfile = async () => {
+    setProfileState("saving");
+    try {
+      const r = await fetch("/api/conversation/profile", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(draftProfile),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || `服务端返回 ${r.status}`);
+      onProfileSaved(d.profile);
+      setProfileState("saved");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setProfileState("idle");
+    }
+  };
   const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
   const [over, setOver] = useState(false);
@@ -28,7 +86,7 @@ export function ContextSheet({
       const names = (info?.docs ?? []).map((d) => d.name).join("、");
       if (
         !window.confirm(
-          `换成新底稿？现有 ${existing} 份原文（${names}）会挪进 data/trash 保留，可以取回。` +
+          `换成新底稿？现有 ${existing} 份原文（${names}）会挪进回收站保留，可以取回。` +
             `\n\n如果这是同一场会补材料，点取消，改选「补进现有底稿」。`,
         )
       ) {
@@ -52,7 +110,7 @@ export function ContextSheet({
       onUploaded(next, replace && existing > 0);
       const bad = next.sources.filter((x) => x.includes("失败"));
       setDone(
-        `${replace && existing > 0 ? "换好了（旧底稿在 data/trash 可取回）：" : "读好了："}` +
+        `${replace && existing > 0 ? "换好了（旧底稿在回收站可取回）：" : "读好了："}` +
           `底稿共 ${next.docs.length} 份原文，术语锁定 ${next.glossarySize} 条，` +
           `原文索引 ${next.indexChunks} 块，会议中可按内容检索。`,
       );
@@ -70,9 +128,35 @@ export function ContextSheet({
     <div className="sheet-bg" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <h2>会议底稿</h2>
+
+        <section className="profile">
+          <h3>会前交代</h3>
+          <p className="hint">
+            这几项由你自己填。不填我就什么都不假设，不会替你安一个身份或立场。
+          </p>
+          {PROFILE_FIELDS.map((f) => (
+            <label className="profile-row" key={f.key}>
+              <span>{f.label}</span>
+              <textarea
+                rows={2}
+                value={draftProfile[f.key]}
+                placeholder={f.placeholder}
+                onChange={(e) => {
+                  setDraftProfile({ ...draftProfile, [f.key]: e.target.value });
+                  setProfileState("idle");
+                }}
+              />
+            </label>
+          ))}
+          <button className="chip" disabled={profileState === "saving"} onClick={saveProfile}>
+            {profileState === "saving" ? "正在存…" : profileState === "saved" ? "已存下" : "保存会前交代"}
+          </button>
+        </section>
+
+        <h3>背景文件</h3>
         <p className="hint">
           上传这场会议的背景文件，我会读出当事人、争点和术语译法。术语表会用来校正字幕里的译法，
-          也会作为拟英文回复的依据。
+          也会作为拟回复的依据。
         </p>
 
         <label
@@ -146,7 +230,7 @@ export function ContextSheet({
               if (r.ok) onUploaded((await r.json()) as ContextInfo);
             }}
           >
-            重新读取 data/context.json
+            重新读取这场会议的摘要
           </button>
           <span className="spacer" style={{ flex: 1 }} />
           <button className="mini" onClick={onClose}>
@@ -187,10 +271,10 @@ export function ContextSheet({
                   <button
                     className="mini"
                     onClick={async () => {
-                      // 会前底稿是手工整理的，清空前问一句。原文仍会留在 data/trash 可取回
+                      // 会前底稿是手工整理的，清空前问一句。原文仍会留在回收站可取回
                       if (
                         !window.confirm(
-                          "清空全部底稿？原文和摘要会挪进 data/trash 保留，可以取回。",
+                          "清空全部底稿？原文和摘要会挪进回收站保留，可以取回。",
                         )
                       ) {
                         return;
@@ -200,7 +284,7 @@ export function ContextSheet({
                         onUploaded((await r.json()) as ContextInfo, true);
                         setDone(
                           "底稿已清空：原文、摘要、术语表、原文索引、检索片段和拟稿记录都清了，" +
-                            "原文和摘要挪进 data/trash 可取回。",
+                            "原文和摘要挪进回收站可取回。",
                         );
                       }
                     }}
@@ -212,6 +296,21 @@ export function ContextSheet({
             </dl>
           </div>
         )}
+
+        <details className="storage">
+          <summary>这些材料存在哪、交给谁处理</summary>
+          <p>
+            <b>存在哪：</b>
+            上传的原文和提炼出的摘要，存在本程序服务器上这场会议自己的目录里，与你的其他
+            会议分开，也与别人的会议分开。删除会先挪进回收站，可以取回。
+          </p>
+          <p>
+            <b>交给谁处理：</b>
+            提炼底稿、拟稿、生成纪要时，材料的相关部分会发给你在「模型设置」里填的那个模型
+            服务商{provider ? `（当前是 ${provider}）` : ""}，由他们的服务器处理。不想外发的
+            材料不要上传。
+          </p>
+        </details>
 
         {info && (info.matter || info.terms.length > 0) && (
           <div className="brief">

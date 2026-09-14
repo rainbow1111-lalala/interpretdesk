@@ -59,6 +59,8 @@ def main_check() -> int:
         client.post("/api/settings", json={
             "text": {"base_url": f"https://{who}.example/v1", "api_key": f"sk-{who}",
                      "model": f"m-{who}"}})
+        # 材料按会议分开存之后，底稿要先有一场会议才有地方落
+        client.post("/api/meetings", json={"title": f"{who} 的虚构会议"})
 
     r = upload(jia, "甲的底稿.txt", "甲方客户的并购交易材料，绝密")
     assert r.status_code == 200, r.text
@@ -91,9 +93,17 @@ def main_check() -> int:
     checks["甲自己的设置还在"] = j["text"]["base_url"] == "https://jia.example/v1"
     checks["甲的 key 不回显明文"] = j["text"]["api_key"] == "" and j["text"]["has_key"]
 
-    # 会议库分开
-    checks["甲乙会议库互不可见"] = (jia.get("/api/meetings").json() == []
-                                    and yi.get("/api/meetings").json() == [])
+    # 会议库分开。各自建过一场，谁也不该在自己的列表里看见对方那场的标题
+    jia_titles = [m["title"] for m in jia.get("/api/meetings").json()]
+    yi_titles = [m["title"] for m in yi.get("/api/meetings").json()]
+    checks["甲乙会议库互不可见"] = (jia_titles == ["jia 的虚构会议"]
+                                    and yi_titles == ["yi 的虚构会议"])
+    # 设置与会议库留在会话根，不许跟着会议目录走
+    jia_root = config.SESSIONS_DIR / jia.cookies.get(main.SESSION_COOKIE)
+    checks["设置与会议库留在会话根"] = (
+        (jia_root / "settings.json").exists() and (jia_root / "meetings.db").exists()
+        and not list((jia_root / "meeting-data").glob("*/meetings.db"))
+        and not list((jia_root / "meeting-data").glob("*/settings.json")))
 
     # 清空只清自己的
     jia.delete("/api/context")

@@ -83,7 +83,7 @@ async def main() -> int:
 
     rows = []
     for q in qs:
-        prompt = drafting.build_prompt(ctx, [], [], q, None, full, cfg.reply_lang)
+        prompt, _ = drafting.build_prompt(ctx, [], [], q, None, full, cfg.reply_lang)
         print(f"— 问题：{q}")
         for c in cands:
             try:

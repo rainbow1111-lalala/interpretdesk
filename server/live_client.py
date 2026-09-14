@@ -50,6 +50,8 @@ class LiveTranslateClient:
         self.audio_q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=200)
         self._handle: str | None = None
         self._stop = asyncio.Event()
+        # 与 QwenLiveClient 对齐：服务端确认这一路收完了，上层停止记录时等它
+        self.finished = asyncio.Event()
         self.audio_tokens = 0
         self.response_tokens = 0
 
@@ -91,6 +93,7 @@ class LiveTranslateClient:
                 })
                 self._drop_stale_audio()
                 await asyncio.sleep(delay)
+        self.finished.set()
         await self.emit({"type": "status", "state": "closed"})
 
     def _drop_stale_audio(self) -> None:
@@ -169,4 +172,6 @@ class LiveTranslateClient:
             if sc.get("turnComplete"):
                 await self.emit({"type": "turn_complete"})
             if self._stop.is_set() and sc.get("turnComplete"):
+                # 停止之后收到的这一次 turnComplete 就是尾句收口，上层据此立刻收摊
+                self.finished.set()
                 return

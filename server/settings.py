@@ -175,7 +175,7 @@ def save(ws: config.Workspace, current: Settings, patch: dict) -> Settings:
     if patch.get("chunk_seconds"):
         current.chunk_seconds = max(1.5, min(10.0, float(patch["chunk_seconds"])))
 
-    ws.root.mkdir(parents=True, exist_ok=True)
+    ws.settings.parent.mkdir(parents=True, exist_ok=True)
     ws.settings.write_text(
         json.dumps(asdict(current), ensure_ascii=False, indent=2), encoding="utf-8")
     ws.settings.chmod(0o600)  # 里面有 api key

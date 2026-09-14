@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "./copy";
-import type { Draft } from "./types";
+import type { Directive, Draft } from "./types";
 
 // mode 告诉后端这一次要的是拟稿还是问我。原来后端在提示词末尾无条件要求「英文正文加
 // ---ZH--- 对照」，把「问含义就中文简答」那条规则压死了，问「这句什么意思」也会回英文
@@ -33,13 +33,17 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 export function Drafting({
   drafts,
   busy,
+  directives,
   onAsk,
   onRefine,
+  onSaveDirective,
 }: {
   drafts: Draft[];
   busy: boolean;
+  directives: Directive[];
   onAsk: (instruction: string, mode?: "draft" | "ask") => void;
   onRefine: (draft: Draft) => void;
+  onSaveDirective: (text: string) => void;
 }) {
   const [text, setText] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
@@ -78,7 +82,9 @@ export function Drafting({
 
   const send = (instruction: string, mode?: "draft" | "ask") => {
     const value = instruction.trim();
-    if (!value || busy) return;
+    // 正在写自动稿时照样放行。手打的要求必须能当场打断，等它写完再接受就晚了：
+    // 屏幕已经翻过去，答的还是上一句。旧流由 App 里的序号挡掉，不会盖住新稿。
+    if (!value) return;
     // 自由输入不传 mode，分不清是拟稿还是问话，交给模型自己认
     onAsk(value, mode);
     setText("");
@@ -125,7 +131,39 @@ export function Drafting({
                       </button>
                     )}
                     {d.refined && <span className="label">已精修</span>}
+                    {!d.auto && d.instruction.trim() && (
+                      <button className="mini" onClick={() => onSaveDirective(d.instruction.trim())}>
+                        存为会中指示
+                      </button>
+                    )}
                   </div>
+                  {d.evidence && (d.evidence.verified.length > 0
+                    || d.evidence.pending.length > 0
+                    || d.evidence.todo.length > 0) && (
+                    <details className="evidence">
+                      <summary>
+                        依据 {d.evidence.verified.length} 条已核对
+                        {d.evidence.pending.length > 0
+                          ? ` · 未核实 ${d.evidence.pending.length} 条` : ""}
+                        {d.evidence.todo.length > 0
+                          ? ` · 待确认 ${d.evidence.todo.length} 条` : ""}
+                      </summary>
+                      {d.evidence.verified.map((it, i) => (
+                        <p className="ev-ok" key={`v${i}`}>
+                          <b>{it.doc || it.tag}</b>「{it.quote}」
+                          {it.note && <span className="ev-note">　{it.note}</span>}
+                        </p>
+                      ))}
+                      {d.evidence.pending.map((it, i) => (
+                        <p className="ev-bad" key={`p${i}`}>
+                          未核实：「{it.quote}」<span className="ev-note">　{it.reason}</span>
+                        </p>
+                      ))}
+                      {d.evidence.todo.map((x, i) => (
+                        <p className="ev-todo" key={`t${i}`}>待确认：{x}</p>
+                      ))}
+                    </details>
+                  )}
                 </>
               )}
             </div>
@@ -151,14 +189,14 @@ export function Drafting({
         />
         <div className="row">
           {QUICK.map((q) => (
-            <button key={q.label} className="chip" disabled={busy}
+            <button key={q.label} className="chip"
                     onClick={() => send(q.instruction, q.mode)}>
               {q.label}
             </button>
           ))}
           <span className="spacer" />
-          <button className="send" disabled={busy || !text.trim()} onClick={() => send(text)}>
-            {busy ? "正在写" : "发出"}
+          <button className="send" disabled={!text.trim()} onClick={() => send(text)}>
+            {busy ? "打断并发出" : "发出"}
           </button>
         </div>
       </div>
